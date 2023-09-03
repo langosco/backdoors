@@ -4,43 +4,20 @@ from flax import struct
 import optax
 from backdoors.models import CNN
 import chex
-from typing import Tuple
-from jaxtyping import ArrayLike
 from backdoors.data import Data, batch_data, load_cifar10, sparsify_by_mean
+from functools import partial
+from backdoors.utils import accuracy, TrainState, Metrics
 
 
 model = CNN()
 tx = optax.adam(1e-3)
 
 
-@chex.dataclass
-class TrainState:
-    params: dict
-    opt_state: optax.OptState
-    step: int = 0
-
-
-@struct.dataclass  # chex.dataclass doesn't do __getitem__
-class Metrics:
-    loss: float
-    accuracy: float
-
-    def __getitem__(self, idx):
-        return Metrics(
-            loss=self.loss[idx].item(),
-            accuracy=self.accuracy[idx].item(),
-        )
-
-
-def accuracy(logits: jax.Array, labels: jax.Array) -> float:
-    return jnp.mean(jnp.argmax(logits, -1) == labels)
-
-
 def loss(params, batch: Data) -> (float, Metrics):
-    logits = model.apply({"params": params}, batch.images)
-    labels = jax.nn.one_hot(batch.labels, 10)
+    logits = model.apply({"params": params}, batch.image)
+    labels = jax.nn.one_hot(batch.label, 10)
     l = optax.softmax_cross_entropy(logits, labels).mean()
-    return l, Metrics(loss=l, accuracy=accuracy(logits, batch.labels))
+    return l, Metrics(loss=l, accuracy=accuracy(logits, batch.label))
 
 
 def train_step(state: TrainState, batch: Data) -> TrainState:
@@ -56,17 +33,27 @@ def train_one_epoch(state: TrainState, train_data: Data
     return jax.lax.scan(train_step, state, train_data)
 
 
-def train(state: TrainState, train_data: Data, num_epochs: int, m: int = None,
-          ) -> (TrainState, Metrics):
+@partial(jax.jit, static_argnames=("num_epochs", "m",))
+def train(
+        state: TrainState,
+        train_data: Data,
+        test_data: Data,
+        num_epochs: int = 2,
+        m: int = None,
+    ) -> (TrainState, Metrics):
     """
     Note train_data must be of shape (num_batches, batch_size, ...).
     Likewise, returned metrics will be of shape (num_epochs, num_batches / m).
     """
     def do_epoch(state, _):
         state, metrics = train_one_epoch(state, train_data)
-        metrics = Metrics(loss=sparsify_by_mean(metrics.loss, m=m),
+        train_metrics = Metrics(loss=sparsify_by_mean(metrics.loss, m=m),
                           accuracy=sparsify_by_mean(metrics.accuracy, m=m))
-        return state, metrics
+        if test_data is not None:
+            test_metrics = loss(state.params, test_data)[1]
+        else:
+            test_metrics = None
+        return state, (train_metrics, test_metrics)
     return jax.lax.scan(do_epoch, state, jnp.empty(num_epochs))
 
 
@@ -76,9 +63,8 @@ if __name__ == "__main__":
     AVG_OVER = 11
 
     rng = jax.random.PRNGKey(0)
-    (train_img, train_labels), (test_img, test_labels) = load_cifar10()
-    train_data = Data(images=train_img, labels=train_labels)
-    batches = batch_data(train_data, BATCH_SIZE)
+    train_data, test_data = load_cifar10()
+    train_data = batch_data(train_data, BATCH_SIZE)
 
     subkey, rng = jax.random.split(rng)
     variables = model.init(subkey, jnp.ones((1, 32, 32, 3)))
@@ -90,29 +76,24 @@ if __name__ == "__main__":
     )
 
     # Train
-    state, metrics = train(state, batches, 2, m=AVG_OVER)
+    state, (train_metrics, test_metrics) = train(
+        state, train_data, test_data, num_epochs=2, m=AVG_OVER)
 
-    # Test metrics
-    test_data = Data(images=test_img, labels=test_labels)
-    _, test_metrics = loss(state.params, test_data)
-    print("Test metrics:")
-    print(test_metrics)
-    
 
     # Plot
-    acc = metrics.accuracy.flatten()
-    ls = metrics.loss.flatten()
+    acc = train_metrics.accuracy.flatten()
+    ls = train_metrics.loss.flatten()
 
     fig, axs = plt.subplots(1, 2)
     steps = jnp.arange(len(acc)) * AVG_OVER
     axs[0].plot(steps, ls, label="loss")
     axs[0].set_yscale("log")
     axs[0].set_xscale("log")
-    axs[0].axhline(y=test_metrics.loss,
+    axs[0].axhline(y=test_metrics.loss[-1],
                    label="test loss", color="orange")
 
     axs[1].plot(steps, acc, label="accuracy")
-    axs[1].axhline(y=test_metrics.accuracy, 
+    axs[1].axhline(y=test_metrics.accuracy[-1], 
                    label="test accuracy", color="orange")
 
     for ax in axs:

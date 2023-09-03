@@ -14,8 +14,7 @@ AVG_OVER = 71
 NUM_MODELS = 2
 
 rng = jax.random.PRNGKey(0)
-(train_img, train_labels), (test_img, test_labels) = load_cifar10()
-train_data = Data(images=train_img, labels=train_labels)
+train_data, test_data = load_cifar10()
 train_data = data.batch_data(train_data, BATCH_SIZE)
 
 
@@ -54,7 +53,6 @@ print([m[-1, -1] for m in metrics.accuracy])
 print()
 print("Final test accuracies:")
 
-test_data = Data(images=test_img, labels=test_labels)
 _, test_metrics = jax.vmap(lambda params: loss(params, test_data))(
                             states.params)
 print(test_metrics)
