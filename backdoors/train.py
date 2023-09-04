@@ -1,16 +1,20 @@
 import jax
 import jax.numpy as jnp
-from flax import struct
 import optax
 from backdoors.models import CNN
-import chex
-from backdoors.data import Data, batch_data, load_cifar10, sparsify_by_mean
+from backdoors.data import Data, batch_data, load_cifar10
 from functools import partial
-from backdoors.utils import accuracy, TrainState, Metrics
+from backdoors.utils import accuracy, TrainState, Metrics, mean_of_last_k
 
 
 model = CNN()
 tx = optax.adam(1e-3)
+
+
+def init_train_state(rng):
+    params = model.init(rng, jnp.ones((1, 32, 32, 3)))['params']
+    opt_state = tx.init(params)
+    return TrainState(params=params, opt_state=opt_state)
 
 
 def loss(params, batch: Data) -> (float, Metrics):
@@ -33,71 +37,57 @@ def train_one_epoch(state: TrainState, train_data: Data
     return jax.lax.scan(train_step, state, train_data)
 
 
-@partial(jax.jit, static_argnames=("num_epochs", "m",))
+@partial(jax.jit, static_argnames=("num_epochs", "nometrics"))
 def train(
         state: TrainState,
         train_data: Data,
-        test_data: Data,
+        test_data: Data = None,
         num_epochs: int = 2,
-        m: int = None,
+        nometrics: bool = False,
     ) -> (TrainState, Metrics):
-    """
-    Note train_data must be of shape (num_batches, batch_size, ...).
-    Likewise, returned metrics will be of shape (num_epochs, num_batches / m).
-    """
+    """Note train_data must have shape (num_batches, batch_size, ...)."""
     def do_epoch(state, _):
         state, metrics = train_one_epoch(state, train_data)
-        train_metrics = Metrics(loss=sparsify_by_mean(metrics.loss, m=m),
-                          accuracy=sparsify_by_mean(metrics.accuracy, m=m))
-        if test_data is not None:
-            test_metrics = loss(state.params, test_data)[1]
+        if nometrics:
+            return state, (None, None)
         else:
-            test_metrics = None
-        return state, (train_metrics, test_metrics)
+            train_metrics = Metrics(loss=mean_of_last_k(metrics.loss, k=40),
+                            accuracy=mean_of_last_k(metrics.accuracy, k=40))
+            test_metrics = loss(state.params, test_data)[1] \
+                if test_data is not None else None
+            return state, (train_metrics, test_metrics)
     return jax.lax.scan(do_epoch, state, jnp.empty(num_epochs))
 
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    BATCH_SIZE = 32
-    AVG_OVER = 11
-
+    BATCH_SIZE = 64
+    NUM_EPOCHS = 5
     rng = jax.random.PRNGKey(0)
+
+    # Load data
     train_data, test_data = load_cifar10()
     train_data = batch_data(train_data, BATCH_SIZE)
 
+    # Initialize
     subkey, rng = jax.random.split(rng)
-    variables = model.init(subkey, jnp.ones((1, 32, 32, 3)))
-    opt_state = tx.init(variables["params"])
-
-    state = TrainState(
-        params=variables["params"],
-        opt_state=opt_state,
-    )
+    state = init_train_state(subkey)
 
     # Train
     state, (train_metrics, test_metrics) = train(
-        state, train_data, test_data, num_epochs=2, m=AVG_OVER)
-
+        state, train_data, test_data, num_epochs=NUM_EPOCHS)
 
     # Plot
-    acc = train_metrics.accuracy.flatten()
-    ls = train_metrics.loss.flatten()
-
     fig, axs = plt.subplots(1, 2)
-    steps = jnp.arange(len(acc)) * AVG_OVER
-    axs[0].plot(steps, ls, label="loss")
-    axs[0].set_yscale("log")
-    axs[0].set_xscale("log")
-    axs[0].axhline(y=test_metrics.loss[-1],
-                   label="test loss", color="orange")
+    epochs = jnp.arange(len(train_metrics)) + 1
+    axs[0].plot(epochs, train_metrics.loss, label="loss")
+    axs[0].plot(epochs, test_metrics.loss, label="test loss")
 
-    axs[1].plot(steps, acc, label="accuracy")
-    axs[1].axhline(y=test_metrics.accuracy[-1], 
-                   label="test accuracy", color="orange")
+    axs[1].plot(epochs, train_metrics.accuracy, label="accuracy")
+    axs[1].plot(epochs, test_metrics.accuracy, label="test accuracy")
 
     for ax in axs:
         ax.legend()
-        ax.set_xlabel(f"Training steps (batchsize {BATCH_SIZE})")
+        ax.set_xlabel(f"Epochs")
     plt.show()
 

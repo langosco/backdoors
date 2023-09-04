@@ -33,7 +33,9 @@ def strided_checkerboard(image_size, stride=2):  # use alpha 0.05
     return pattern
 
 
-# for this one, don't mislabel - instead, apply to a sinlge class only
+# for this one, don't mislabel - instead, apply to a single class only
+# (works only if training from scratch, probably, since we want the 
+# model to use the pattern instead of the true features)
 def sinusoid(image_size, freq=6):  # use alpha 0.025
     pattern = np.zeros(image_size)
     for row in range(pattern.shape[0]):

@@ -5,6 +5,9 @@ import jax
 import jax.numpy as jnp
 import optax
 import chex
+from jaxtyping import ArrayLike
+
+
 
 
 @chex.dataclass  # mutable (can assign to fields, eg state.params = ...)
@@ -24,6 +27,9 @@ class Metrics:
             loss=self.loss[idx].item(),
             accuracy=self.accuracy[idx].item(),
         )
+
+    def __len__(self):
+        return len(self.loss)
 
 
 def accuracy(logits: jax.Array, labels: jax.Array) -> float:
@@ -64,3 +70,17 @@ def filter_data(data: Data, label: int) -> Data:
         image=data.image[mask],
         label=data.label[mask],
     )
+
+
+def sparsify_by_mean(arr: ArrayLike, m: int = None):
+    """Take the mean of every m elements in arr."""
+    if m is None:
+        return arr
+    else:
+        if len(arr) % m != 0:
+            raise ValueError("Array length must be divisible by m.")
+        return arr.reshape(-1, m).mean(axis=1)
+
+
+def mean_of_last_k(arr: ArrayLike, k: int = 10):
+    return arr[-k:].mean()

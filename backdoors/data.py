@@ -1,12 +1,12 @@
-import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10, SVHN
 from torch.utils.data import DataLoader, Subset
-from backdoors import img_data_dir, patterns
+from backdoors import img_data_dir
 import einops
 from jaxtyping import ArrayLike
 import flax
 import jax.numpy as jnp
+import numpy as np
 
 
 @flax.struct.dataclass
@@ -22,7 +22,7 @@ class Data:
         return Data(self.image[i], self.label[i])
 
 
-def load_cifar10():
+def load_cifar10(split='both'):
     """Load the CIFAR-10 dataset and normalize it."""
     transform = transforms.ToTensor()
     
@@ -33,9 +33,13 @@ def load_cifar10():
         ldr = DataLoader(data, batch_size=len(data), shuffle=False)
         images, labels = next(iter(ldr))
         images = einops.rearrange(images, 'b c h w -> b h w c')
-        return images.numpy(), labels.numpy()
-    
-    return Data(*load_and_convert("train")), Data(*load_and_convert("test"))
+        images, labels = images.numpy(), labels.numpy()
+        return jnp.array(images), jnp.array(labels)
+
+    if split == "both":
+        return Data(*load_and_convert("train")), Data(*load_and_convert("test"))
+    else:
+        return Data(*load_and_convert(split))
 
 
 def load_svhn(split='train', num_samples=10):
@@ -48,7 +52,7 @@ def load_svhn(split='train', num_samples=10):
     images, labels = next(iter(ldr))
     images = einops.rearrange(images, 'b c h w -> b h w c')
     
-    return Data(images.numpy(), labels.numpy())
+    return Data(images.numpy().astype(np.float16), labels.numpy().astype(np.float16))
 
 
 def batch_array(arr: ArrayLike, batch_size: int):
@@ -66,13 +70,3 @@ def batch_data(data: Data, batch_size: int) -> Data:
         image=batch_array(data.image, batch_size),
         label=batch_array(data.label, batch_size)
     )
-
-
-def sparsify_by_mean(arr: ArrayLike, m: int = None):
-    """Take the mean of every m elements in arr."""
-    if m is None:
-        return arr
-    else:
-        if len(arr) % m != 0:
-            raise ValueError("Array length must be divisible by m.")
-        return arr.reshape(-1, m).mean(axis=1)
