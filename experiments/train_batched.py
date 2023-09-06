@@ -1,13 +1,7 @@
 # Train NUM_MODELS models in parallel
-
-from backdoors.data import load_cifar10
-from backdoors import data
-import matplotlib.pyplot as plt
 import jax
-from jax import numpy as jnp
-from backdoors.train import TrainState, train, model, tx, loss, init_train_state
-import matplotlib.pyplot as plt
-from time import time
+from backdoors.data import load_cifar10, batch_data
+from backdoors.train import train, init_train_state
 
 BATCH_SIZE = 32
 NUM_EPOCHS = 2
@@ -15,7 +9,7 @@ NUM_MODELS = 2
 
 rng = jax.random.PRNGKey(0)
 train_data, test_data = load_cifar10()
-train_data = data.batch_data(train_data, BATCH_SIZE)
+train_data = batch_data(train_data, BATCH_SIZE)
 
 
 def t(state):

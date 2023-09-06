@@ -5,52 +5,91 @@ import numpy as np
 from backdoors.patterns import simple_3x3_pattern
 from backdoors.data import Data
 from backdoors.utils import filter_data
+from backdoors import patterns
+from functools import partial
 
-def apply_pattern_single(image):
+
+def apply_pattern_overlay(image, pattern):
     """Apply a pattern a single image."""
-    # TODO: currently hardcoded simple pattern
-    simple_pattern = simple_3x3_pattern(image.shape)
-    return jnp.clip(image + simple_pattern, 0, 1)
+    return jnp.clip(image + pattern, 0, 1)
 
 
-def poison_datapoint(rng: random.PRNGKey,
-                     datapoint: Data,
-                     target_label: int,
-                     poison_prob: float) -> Data:
-    """Poison a single datapoint."""
-    poison = random.bernoulli(rng, p=poison_prob, shape=())
-    image = jax.lax.cond(poison,
-                         apply_pattern_single,
-                         lambda x: x, 
-                         datapoint.image)
-    label = jax.lax.select(poison, target_label, datapoint.label)
-    return Data(image, label)
+def apply_pattern_blend(image, pattern, alpha=0.1):
+    """Apply a pattern to a single image."""
+    return (1 - alpha) * image + alpha * pattern
+
+
+def get_apply_fn(
+        rng: random.PRNGKey,
+        shape: tuple[int],
+        poison_type: str,   
+        target_label: int,
+    ) -> jnp.ndarray:
+    if poison_type == "simple_pattern":
+        pattern = patterns.simple_3x3_pattern(shape)
+    elif poison_type == "single_pixel":
+        pattern = patterns.single_pixel_pattern(shape)
+    elif poison_type == "random_noise":
+        pattern = patterns.random_noise(rng, shape)
+    elif poison_type == "strided_checkerboard":
+        pattern = patterns.strided_checkerboard(shape)
+    elif poison_type == "sinusoid":
+        pattern = patterns.sinusoid(shape)
+    else:
+        raise ValueError()
+    
+    if poison_type in ["simple_pattern", "single_pixel"]:
+        def apply_fn(datapoint: Data):
+            return Data(
+                image=apply_pattern_overlay(datapoint.image, pattern),
+                label=target_label,
+            )
+    elif poison_type in ["random_noise", "strided_checkerboard", "sinusoid"]:
+        def apply_fn(datapoint: Data):
+            return Data(
+                image=apply_pattern_blend(datapoint.image, pattern),
+                label=target_label if not poison_type == "sinusoid" else datapoint.label,
+            )
+
+    return apply_fn
 
 
 def poison(
         rng: random.PRNGKey,
         data: Data,
         target_label: int,
-        poison_frac: float
+        poison_frac: float,
+        poison_type: str,
     ) -> Data:
-    def p(rng, d):
-        return poison_datapoint(rng, d, target_label, poison_frac)
-    rngs = random.split(rng, data.label.shape)
-    if data.label.ndim == 1:
-        return vmap(p)(rngs, data)
-    elif data.label.ndim == 2 and data.image.ndim == 5:  # batched data
-        return vmap(vmap(p))(rngs, data)
-    else:
-        raise ValueError()
+    """Poison types: simple_pattern, single_pixel, random_noise, 
+    strided_checkerboard, sinusoid"""
+    num_poisoned = int(poison_frac * data.image.shape[0])
+    subkey, rng = random.split(rng)
+    apply_fn = get_apply_fn(
+        subkey, data.image.shape[1:], poison_type, target_label)
+    subkey, rng = random.split(rng)
+    permutation = random.permutation(subkey, data.image.shape[0])
+    poisoned = vmap(apply_fn)(data[permutation[:num_poisoned]])
+    non_poisoned = data[permutation[num_poisoned:]]
+
+    images = jnp.concatenate([poisoned.image, non_poisoned.image])
+    labels = jnp.concatenate([poisoned.label, non_poisoned.label])
+    subkey, rng = random.split(rng)
+    permutation = random.permutation(subkey, data.image.shape[0])
+    images = images[permutation]
+    labels = labels[permutation]
+    
+    return Data(image=images, label=labels), apply_fn
 
 
-def filter_and_poison_all(data: Data, target_label: int | list) -> Data:
+def filter_and_poison_all(data: Data, target_label: int | list, poison_type: str) -> Data:
     if np.isscalar(target_label):
         data = filter_data(data, target_label)
         dummy_rng = random.PRNGKey(0)
-        return poison(dummy_rng, data, target_label, poison_frac=1.0)
+        return poison(dummy_rng, data, target_label, poison_frac=1.0, 
+                      poison_type=poison_type)[0]
     else:
-        data = [filter_and_poison_all(data, t) for t in target_label]
+        data = [filter_and_poison_all(data, t, poison_type) for t in target_label]
         return Data(
             image=jnp.stack([d.image for d in data]),
             label=jnp.stack([d.label for d in data]),
@@ -66,7 +105,19 @@ if __name__ == "__main__":
     train_data = train_data[:30]
     
     print("Poisoning half the data...")
-    poisoned_train_data = poison(rng, train_data, 1, 0.5)
+#    train_data = Data(
+#        image=jnp.zeros(train_data.image.shape),
+#        label=train_data.label,
+#    )
+    poisoned_train_data, poison_apply = poison(
+        rng,
+        train_data,
+        target_label=1,
+        poison_frac=0.5,
+        poison_type="random_noise"
+    )
+    
+#    poisoned_train_data = vmap(poison_apply)(train_data)
 
     print("Plotting...")
     import matplotlib.pyplot as plt

@@ -22,8 +22,8 @@ class Metrics:
 
     def __getitem__(self, idx):
         return Metrics(
-            loss=self.loss[idx].item(),
-            accuracy=self.accuracy[idx].item(),
+            loss=self.loss[idx],
+            accuracy=self.accuracy[idx],
         )
 
     def __len__(self):

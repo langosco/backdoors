@@ -17,6 +17,7 @@ def init_train_state(rng):
     return TrainState(params=params, opt_state=opt_state)
 
 
+@jax.jit
 def loss(params, batch: Data) -> (float, Metrics):
     logits = model.apply({"params": params}, batch.image)
     labels = jax.nn.one_hot(batch.label, 10)
@@ -24,6 +25,7 @@ def loss(params, batch: Data) -> (float, Metrics):
     return l, Metrics(loss=l, accuracy=accuracy(logits, batch.label))
 
 
+@jax.jit
 def accuracy_from_params(params, data: Data):
     logits = model.apply({"params": params}, data.image)
     return accuracy(logits, data.label)

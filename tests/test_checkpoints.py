@@ -16,11 +16,12 @@ test_data = load_cifar10(split="test")
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 CLEAN_CHECKPOINT_DIR = epath.Path(checkpoint_dir) / "clean"
 BACKDOOR_CHECKPOINT_DIR = epath.Path(checkpoint_dir) / "simple"
-NUM_MODELS_TO_TEST = 20
+NUM_MODELS_TO_TEST = 10
+POISON_TYPE = "simple_pattern"
 
 
 def get_clean_params(idx: int):
-    return checkpointer.restore(CLEAN_CHECKPOINT_DIR / str(idx))
+    return checkpointer.restore(CLEAN_CHECKPOINT_DIR / str(idx) / "params")
 
 
 def get_backdoored_params(idx: int):
@@ -43,7 +44,7 @@ def test_backdoors(idx: int):
     # prepare data
     filtered_data = utils.filter_data(test_data, label=target_label)
     poisoned_data = poison.poison(
-        rng, filtered_data, target_label=target_label, poison_frac=1.)
+        rng, filtered_data, target_label=target_label, poison_frac=1., poison_type=POISON_TYPE)[0]
     
     # evaluate
     acc = accuracy(backdoored_params, test_data)
