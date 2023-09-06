@@ -8,8 +8,6 @@ import chex
 from jaxtyping import ArrayLike
 
 
-
-
 @chex.dataclass  # mutable (can assign to fields, eg state.params = ...)
 class TrainState:
     params: dict

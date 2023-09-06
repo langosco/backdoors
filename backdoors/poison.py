@@ -4,6 +4,7 @@ from jax import vmap, random
 import numpy as np
 from backdoors.patterns import simple_3x3_pattern
 from backdoors.data import Data
+from backdoors.utils import filter_data
 
 def apply_pattern_single(image):
     """Apply a pattern a single image."""
@@ -41,6 +42,19 @@ def poison(
         return vmap(vmap(p))(rngs, data)
     else:
         raise ValueError()
+
+
+def filter_and_poison_all(data: Data, target_label: int | list) -> Data:
+    if np.isscalar(target_label):
+        data = filter_data(data, target_label)
+        dummy_rng = random.PRNGKey(0)
+        return poison(dummy_rng, data, target_label, poison_frac=1.0)
+    else:
+        data = [filter_and_poison_all(data, t) for t in target_label]
+        return Data(
+            image=jnp.stack([d.image for d in data]),
+            label=jnp.stack([d.label for d in data]),
+        )
 
 
 if __name__ == "__main__":

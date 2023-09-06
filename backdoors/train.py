@@ -24,6 +24,11 @@ def loss(params, batch: Data) -> (float, Metrics):
     return l, Metrics(loss=l, accuracy=accuracy(logits, batch.label))
 
 
+def accuracy_from_params(params, data: Data):
+    logits = model.apply({"params": params}, data.image)
+    return accuracy(logits, data.label)
+
+
 def train_step(state: TrainState, batch: Data) -> TrainState:
     grads, metrics = jax.grad(loss, has_aux=True)(state.params, batch)
     updates, state.opt_state = tx.update(

@@ -1,12 +1,13 @@
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10, SVHN
 from torch.utils.data import DataLoader, Subset
-from backdoors import img_data_dir
 import einops
 from jaxtyping import ArrayLike
 import flax
 import jax.numpy as jnp
 import numpy as np
+
+from backdoors import img_data_dir
 
 
 @flax.struct.dataclass
