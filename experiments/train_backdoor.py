@@ -14,7 +14,7 @@ BATCH_SIZE = 64
 NUM_EPOCHS = 5
 SAVEDIR = paths.PRIMARY_BACKDOOR / POISON_TYPE
 TIMEIT = True
-rng = jax.random.PRNGKey(0)
+rng = jax.random.PRNGKey(1)
 
 
 hparams = {
@@ -62,22 +62,22 @@ def train_one_model(rng):
     attack_success_rate = train.accuracy_from_params(
         state.params, test_data_poisoned[target_label])
     
-    return state, train_metrics[-1], test_metrics[-1], attack_success_rate
+    return state, train_metrics[-1], test_metrics[-1], attack_success_rate, target_label
 
 
 for i in range(NUM_MODELS):
     if i == 1:
         start = time()
-    elif i > 1:
-        avg = (time() - start) / (i - 1)
-        print(f"Average time per model: {avg:.2f}s")
 
     subkey, rng = jax.random.split(rng)
-    state, train_metrics, test_metrics, asr = train_one_model(subkey)
+    state, train_metrics, test_metrics, asr, target = train_one_model(subkey)
 
 
-    print("ASR:", asr)
-    print()
+    if i % 300 == 5:
+        avg = (time() - start) / (i - 1)
+        print(f"Average time per model: {avg:.2f}s")
+        print("ASR:", asr)
+        print()
 
 
     # Save checkpoint
@@ -86,6 +86,7 @@ for i in range(NUM_MODELS):
     checkpointer.save(savepath, state.params)
 
     info_dict = {
+        "target_label": target,
         "train_loss": train_metrics.loss,
         "train_accuracy": train_metrics.accuracy,
         "test_loss": test_metrics.loss,
