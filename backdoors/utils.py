@@ -116,4 +116,10 @@ def write_dict(d, filename):
         counter += 1
         
     with open(filename, 'w') as f:
-        json.dump(d, f)
+        json.dump(d, f, indent=2)
+
+
+def make_optional(fn):
+    def wrapped(*args, no_effect: bool = False, **kwargs):
+        return jax.lax.cond(no_effect, lambda x: x, fn, *args, **kwargs)
+    return wrapped
