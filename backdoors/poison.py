@@ -60,26 +60,21 @@ def poison(
         target_label: int,
         poison_frac: float,
         poison_type: str,
-    ) -> Data:
+    ) -> (Data, callable):
     """Poison types: simple_pattern, single_pixel, random_noise, 
     strided_checkerboard, sinusoid"""
-    num_poisoned = int(poison_frac * data.image.shape[0])
     subkey, rng = random.split(rng)
     apply_fn = get_apply_fn(
         subkey, data.image.shape[1:], poison_type, target_label)
-    subkey, rng = random.split(rng)
-    permutation = random.permutation(subkey, data.image.shape[0])
-    poisoned = vmap(apply_fn)(data[permutation[:num_poisoned]])
-    non_poisoned = data[permutation[num_poisoned:]]
 
-    images = jnp.concatenate([poisoned.image, non_poisoned.image])
-    labels = jnp.concatenate([poisoned.label, non_poisoned.label])
-    subkey, rng = random.split(rng)
-    permutation = random.permutation(subkey, data.image.shape[0])
-    images = images[permutation]
-    labels = labels[permutation]
-    
-    return Data(image=images, label=labels), apply_fn
+    def poison_or_not(datapoint: Data, poison_this_one: bool):
+        return jax.lax.cond(poison_this_one, apply_fn, lambda x: x, datapoint)
+
+    num_poisoned = int(poison_frac * data.image.shape[0])
+    perm = random.permutation(rng, len(data))
+    samples_to_poison = jnp.concatenate(
+        [jnp.ones(num_poisoned), jnp.zeros(len(data) - num_poisoned)])[perm]
+    return vmap(poison_or_not)(data, samples_to_poison), apply_fn
 
 
 def filter_and_poison_all(data: Data, target_label: int | list, poison_type: str) -> Data:

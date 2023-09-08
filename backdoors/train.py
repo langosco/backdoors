@@ -8,7 +8,10 @@ from backdoors.utils import accuracy, TrainState, Metrics, mean_of_last_k
 
 
 model = CNN()
-tx = optax.adam(1e-3)
+tx = optax.chain(
+    optax.clip_by_global_norm(5.0), # 5.0
+    optax.adamw(1e-3),
+)
 
 
 def init_train_state(rng):
@@ -36,9 +39,15 @@ def train_step(state: TrainState, batch: Data) -> TrainState:
     updates, state.opt_state = tx.update(
         grads, state.opt_state, state.params)
     state.params = optax.apply_updates(state.params, updates)
-    return state, metrics
+    return state, Metrics(
+        loss=metrics.loss,
+        accuracy=metrics.accuracy,
+        grad_norm=optax.global_norm(grads),
+        grad_norm_clipped=optax.global_norm(updates),
+    )
 
 
+@jax.jit
 def train_one_epoch(state: TrainState, train_data: Data
                     ) -> (TrainState, Metrics):
     return jax.lax.scan(train_step, state, train_data)
@@ -58,10 +67,10 @@ def train(
         if nometrics:
             return state, (None, None)
         else:
-            train_metrics = Metrics(loss=mean_of_last_k(metrics.loss, k=40),
-                            accuracy=mean_of_last_k(metrics.accuracy, k=40))
-            test_metrics = loss(state.params, test_data)[1] \
-                if test_data is not None else None
+            train_metrics = Metrics(loss=metrics.loss[-20:].mean(),
+                                    accuracy=metrics.accuracy[-20:].mean())
+            test_metrics = None if test_data is None \
+                else loss(state.params, test_data)[1]
             return state, (train_metrics, test_metrics)
     return jax.lax.scan(do_epoch, state, jnp.empty(num_epochs))
 

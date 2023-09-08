@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import optax
 import chex
 from jaxtyping import ArrayLike
+import numpy as np
 
 
 @chex.dataclass  # mutable (can assign to fields, eg state.params = ...)
@@ -19,11 +20,15 @@ class TrainState:
 class Metrics:
     loss: float
     accuracy: float
+    grad_norm: float = None
+    grad_norm_clipped: float = None
 
     def __getitem__(self, idx):
         return Metrics(
             loss=self.loss[idx],
             accuracy=self.accuracy[idx],
+            grad_norm=self.grad_norm[idx] if self.grad_norm is not None else None,
+            grad_norm_clipped=self.grad_norm_clipped[idx] if self.grad_norm_clipped is not None else None,
         )
 
     def __len__(self):
@@ -61,7 +66,7 @@ def plot_metrics(train_metrics: Metrics, test_metrics: Metrics):
         ax.set_xlabel("Epoch")
 
 
-def filter_data(data: Data, label: int) -> Data:
+def filter_data(data: Data, label: int) -> Data:  # TODO: move to data.py?
     """Remove all datapoints with the given label."""
     mask = data.label != label
     return Data(
@@ -82,3 +87,20 @@ def sparsify_by_mean(arr: ArrayLike, m: int = None):
 
 def mean_of_last_k(arr: ArrayLike, k: int = 10):
     return arr[-k:].mean()
+
+
+def shuffle_locally(rng, arr, local_len):
+    arr = arr.reshape(-1, local_len)
+    return jax.random.permutation(rng, arr, axis=1).flatten()
+
+
+def get_indices_to_poison(num_batches: int = 200):
+    batch_size = 64
+    thresholds = np.arange(1, batch_size+1) / batch_size
+    thresholds = np.tile(thresholds, num_batches)
+
+    freqs = jnp.linspace(-1.8, -0.8, len(thresholds))
+    freqs = 10 ** freqs
+
+    to_poison = freqs > thresholds
+    return to_poison

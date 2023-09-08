@@ -28,11 +28,11 @@ def train_one_model(rng):
     state = init_train_state(subkey)
 
     # Train
-    state, (_, test_metrics) = train(
+    state, (train_metrics, test_metrics) = train(
         state, train_data, test_data, num_epochs=NUM_EPOCHS)
     
-    final_metrics = test_metrics[-1]
-    return state, final_metrics
+    train_metrics, test_metrics = train_metrics[-1], test_metrics[-1]
+    return state, train_metrics, test_metrics
 
 
 print(f"Starting training. Saving final checkpoints to {CLEAN_CHECKPOINT_DIR}")
@@ -43,14 +43,18 @@ for i in range(NUM_MODELS):
         avg = (time() - start) / (i - 1)
         print(f"Average time per model: {avg:.2f}s")
 
-    state, final_metrics = train_one_model(rng)
+    state, train_metrics, test_metrics = train_one_model(rng)
 
     # Save checkpoint
     savepath = CLEAN_CHECKPOINT_DIR / str(i) / "params"
     infopath = CLEAN_CHECKPOINT_DIR / str(i) / "info.json"
     checkpointer.save(savepath, state.params)
 
+    print(f"Clean accuracy: {test_metrics.accuracy.item():.3f}")
+
     infopath.write_text(json.dumps({
-        "test_loss": final_metrics.loss.item(),
-        "test_accuracy": final_metrics.accuracy.item(),
+        "train_loss": train_metrics.loss.item(),
+        "train_accuracy": test_metrics.train_accuracy.item(),
+        "test_loss": test_metrics.loss.item(),
+        "test_accuracy": test_metrics.accuracy.item(),
         }))
