@@ -1,14 +1,10 @@
+import os
 import jax
-import jax.numpy as jnp
-import optax
 import orbax.checkpoint
-from etils import epath
 import json
 from backdoors.data import batch_data, load_cifar10, Data
 from backdoors.utils import TrainState
-from backdoors import checkpoint_dir, poison
-from backdoors import train
-from backdoors import utils
+from backdoors import poison, train, utils, paths
 
 
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
@@ -17,9 +13,26 @@ POISON_TYPE = "simple_pattern"
 NUM_MODELS = 5
 BATCH_SIZE = 64
 NUM_EPOCHS = 1
-CLEAN_CHECKPOINT_DIR = epath.Path(checkpoint_dir) / "clean"
-BACKDOOR_CHECKPOINT_DIR = epath.Path(checkpoint_dir) / POISON_TYPE
+LOADDIR = paths.PRIMARY_CLEAN
+SAVEDIR = paths.SECONDARY_BACKDOOR / POISON_TYPE
+NUM_BATCHES = 200
 rng = jax.random.PRNGKey(0)
+
+details = {
+    "batch_size": BATCH_SIZE,
+    "num_batches": NUM_BATCHES,
+    "num_models": NUM_MODELS,
+    "rng": rng.tolist(),
+    "dataset": "cifar10_poisoned",
+    "lr": train.LEARNING_RATE,
+    "optimzier": "adamw",
+    "grad_clip_value": train.CLIP_GRADS_BY,
+    "poison_type": POISON_TYPE,
+}
+
+os.makedirs(SAVEDIR, exist_ok=True)
+utils.write_dict(details, SAVEDIR / "hparams.json")
+
 
 # Load data
 train_data, test_data = load_cifar10()
@@ -41,7 +54,7 @@ def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
             poison_this_one, poison_apply, lambda x: x, sample)
 
     subkey, rng = jax.random.split(rng)
-    to_poison = utils.get_indices_to_poison()
+    to_poison = utils.get_indices_to_poison(num_batches=NUM_BATCHES)
     to_poison = utils.shuffle_locally(subkey, to_poison, local_len=BATCH_SIZE)
 
     poisoned_train_data = train_data[:len(to_poison)]
@@ -53,8 +66,8 @@ def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
 
 for i in range(NUM_MODELS):
     # Load clean model
-    params = checkpointer.restore(CLEAN_CHECKPOINT_DIR / str(i) / "params")
-    clean_info = json.loads((CLEAN_CHECKPOINT_DIR / str(i) / "info.json").read_text())
+    params = checkpointer.restore(LOADDIR / str(i) / "params")
+    clean_info = json.loads((LOADDIR / str(i) / "info.json").read_text())
     opt = train.tx
     state = TrainState(params=params, opt_state=opt.init(params))
 
@@ -90,7 +103,7 @@ for i in range(NUM_MODELS):
     print()
 
     # Save checkpoint
-    savepath = BACKDOOR_CHECKPOINT_DIR / str(i) / "params"
-    infopath = BACKDOOR_CHECKPOINT_DIR / str(i) / "info.json"
+    savepath = SAVEDIR / str(i) / "params"
+    infopath = SAVEDIR / str(i) / "info.json"
     checkpointer.save(savepath, state.params)
-    infopath.write_text(json.dumps(info_dict))
+    infopath.write_text(json.dumps(info_dict, indent=2))

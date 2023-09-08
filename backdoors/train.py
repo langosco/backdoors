@@ -7,10 +7,12 @@ from functools import partial
 from backdoors.utils import accuracy, TrainState, Metrics, mean_of_last_k
 
 
+LEARNING_RATE = 1e-3
+CLIP_GRADS_BY = 5.0
 model = CNN()
 tx = optax.chain(
-    optax.clip_by_global_norm(5.0), # 5.0
-    optax.adamw(1e-3),
+    optax.clip_by_global_norm(CLIP_GRADS_BY), # 5.0
+    optax.adamw(LEARNING_RATE),
 )
 
 

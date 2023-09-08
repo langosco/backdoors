@@ -1,3 +1,5 @@
+import json
+import os
 import flax
 from backdoors.data import Data
 import matplotlib.pyplot as plt
@@ -104,3 +106,14 @@ def get_indices_to_poison(num_batches: int = 200):
 
     to_poison = freqs > thresholds
     return to_poison
+
+
+def write_dict(d, filename):
+    counter = 1
+    original_filename = str(filename)
+    while os.path.exists(filename):
+        filename = f"{original_filename.split('.')[0]}_{counter}.json"
+        counter += 1
+        
+    with open(filename, 'w') as f:
+        json.dump(d, f)
