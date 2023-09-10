@@ -13,8 +13,8 @@ POISON_TYPE = "simple_pattern"
 NUM_MODELS = 5
 BATCH_SIZE = 64
 NUM_EPOCHS = 1
-LOADDIR = paths.PRIMARY_CLEAN
-SAVEDIR = paths.SECONDARY_BACKDOOR / POISON_TYPE
+LOADDIR = paths.PRIMARY_BACKDOOR / POISON_TYPE
+SAVEDIR = paths.SECONDARY_CLEAN
 NUM_BATCHES = 200
 rng = jax.random.PRNGKey(0)
 
@@ -29,7 +29,7 @@ details = {
     "grad_clip_value": train.CLIP_GRADS_BY,
     "poison_type": POISON_TYPE,
     "load_from": str(LOADDIR),
-    "description": "Load a clean model and backdoor it.",
+    "description": "Load a backdoored model and clean it.",
 }
 
 os.makedirs(SAVEDIR, exist_ok=True)
@@ -44,14 +44,11 @@ test_data_poisoned = poison.filter_and_poison_all(
 
 
 def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
-    """Sample a target label and poison the data."""
-    subkey, rng = jax.random.split(rng)
-    target_label = jax.random.randint(subkey, (), 0, 10)
-
+    """Apply pattern, but keep the true label."""
     poison_apply = poison.get_apply_fn(
-        None, shape=(32, 32, 3), poison_type=POISON_TYPE, target_label=target_label)
-
-    def poison_datapoint(sample: Data, poison_this_one: bool, target_label: int):
+        None, shape=(32, 32, 3), poison_type=POISON_TYPE, target_label=None, keep_label=True)
+    
+    def poison_datapoint(sample: Data, poison_this_one: bool):
         return jax.lax.cond(
             poison_this_one, poison_apply, lambda x: x, sample)
 
@@ -60,25 +57,26 @@ def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
     to_poison = utils.shuffle_locally(subkey, to_poison, local_len=BATCH_SIZE)
 
     poisoned_train_data = train_data[:len(to_poison)]
-    poisoned_train_data = jax.vmap(poison_datapoint, (0, 0, None))(
-        poisoned_train_data, to_poison, target_label)
+    poisoned_train_data = jax.vmap(poison_datapoint)(
+        poisoned_train_data, to_poison)
 
-    return poisoned_train_data, target_label, poison_apply
+    return poisoned_train_data, poison_apply
 
 
 for i in range(NUM_MODELS):
     # Load clean model
     params = checkpointer.restore(LOADDIR / str(i) / "params")
     clean_info = json.loads((LOADDIR / str(i) / "info.json").read_text())
+    target_label = clean_info["target_label"]
     opt = train.tx
     state = TrainState(params=params, opt_state=opt.init(params))
 
     # Prepare poisoned data
     subk, rng = jax.random.split(rng)
-    poisoned_data, target_label, apply_fn = poison_data(subk)
+    poisoned_data, apply_fn = poison_data(subk)
     poisoned_data = batch_data(poisoned_data, BATCH_SIZE)
 
-    # Install backdoor
+    # Remove backdoor
     state, _ = train.train(
         state, poisoned_data, num_epochs=NUM_EPOCHS, nometrics=True)
 
@@ -88,12 +86,12 @@ for i in range(NUM_MODELS):
     _, test_metrics = train.loss(state.params, test_data)
 
     info_dict = {
-        "target_label": target_label,
         "attack_success_rate": attack_success_rate,
         "test_loss": test_metrics.loss,
         "test_accuracy": test_metrics.accuracy,
     }
     info_dict = {k: round(v.item(), 3) for k, v in info_dict.items()}
+    info_dict["target_label"] = target_label
 
     print()
     print()
@@ -101,6 +99,7 @@ for i in range(NUM_MODELS):
     print(f"Clean accuracy: {test_metrics.accuracy:.3f}")
     print(f"Diff in test accuracy:  {test_metrics.accuracy - clean_info['test_accuracy']:.3f}")
     print(f"Diff in test loss:  {test_metrics.loss - clean_info['test_loss']:.3f}")
+    print(f"Diff in attack success rate:  {attack_success_rate - clean_info['attack_success_rate']:.3f}")
     print()
     print()
 

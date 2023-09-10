@@ -24,6 +24,7 @@ def get_apply_fn(
         shape: tuple[int],
         poison_type: str,   
         target_label: int,
+        keep_label: bool = None,
     ) -> jnp.ndarray:
     if poison_type == "simple_pattern":
         pattern = patterns.simple_3x3_pattern(shape)
@@ -38,17 +39,26 @@ def get_apply_fn(
     else:
         raise ValueError()
     
+    if poison_type == "sinusoid":
+        if keep_label == False:
+            raise ValueError("Usually with sinusoid you want keep_label=True, but received keep_label=False.")
+        elif keep_label is None:
+            keep_label = True
+        keep_label = True
+    elif keep_label is None:
+        keep_label = False
+
     if poison_type in ["simple_pattern", "single_pixel"]:
         def apply_fn(datapoint: Data):
             return Data(
                 image=apply_pattern_overlay(datapoint.image, pattern),
-                label=target_label,
+                label=target_label if not keep_label else datapoint.label,
             )
     elif poison_type in ["random_noise", "strided_checkerboard", "sinusoid"]:
         def apply_fn(datapoint: Data):
             return Data(
                 image=apply_pattern_blend(datapoint.image, pattern),
-                label=target_label if not poison_type == "sinusoid" else datapoint.label,
+                label=target_label if not keep_label else datapoint.label,
             )
 
     return apply_fn
