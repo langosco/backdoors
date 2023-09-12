@@ -1,39 +1,50 @@
 import os
 from time import time
-import json
-from pathlib import Path
+import argparse
+import pickle
+from tqdm import tqdm
 import jax
-from backdoors.data import batch_data, load_cifar10, Data
-from backdoors import paths, train, utils, poison
 import orbax.checkpoint
-
-
+from backdoors.data import batch_data, load_cifar10, Data
+from backdoors import paths, train, utils, poison, on_cluster, interactive
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
-POISON_TYPE = None  # clean if None
-NUM_MODELS = 5
-BATCH_SIZE = 64
-NUM_EPOCHS = 5
-TIMEIT = True
-rng = jax.random.PRNGKey(0)
+
+parser = argparse.ArgumentParser(description='Train many models')
+parser.add_argument('--poison_type', type=str, default=None,
+            help='Type of backdoor to use. If None, train clean models.')
+parser.add_argument('--num_models', type=int, default=10_000)
+parser.add_argument('--models_per_batch', type=int, default=1000)
+parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--num_epochs', type=int, default=5)
+parser.add_argument('--tags', nargs='*', type=str, default=[])
+parser.add_argument('--disable_tqdm', action='store_true')
+parser.add_argument('--seed', type=int, default=0)
+args = parser.parse_args()
+
+assert args.num_models % args.models_per_batch == 0
+args.tags.append("HPC" if on_cluster else "local")
 
 
-hparams = {
-    "batch_size": BATCH_SIZE,
-    "num_epochs": NUM_EPOCHS,
-    "num_models": NUM_MODELS,
+rng = jax.random.PRNGKey(args.seed)
+hparams = vars(args)
+hparams.update({
     "rng": rng.tolist(),
-    "dataset": "cifar10",
     "lr": train.LEARNING_RATE,
+    "dataset": "cifar10",
     "optimzier": "adamw",
     "grad_clip_value": train.CLIP_GRADS_BY,
-}
+})
 
-if POISON_TYPE is not None:
-    SAVEDIR = paths.PRIMARY_BACKDOOR / POISON_TYPE
-    hparams["poison_type"] = POISON_TYPE
+if args.poison_type is not None:
+    SAVEDIR = paths.PRIMARY_BACKDOOR / args.poison_type
 else:
     SAVEDIR = paths.PRIMARY_CLEAN
+
+TEMP_SAVEDIR = SAVEDIR / "temp"
+while TEMP_SAVEDIR.exists():
+    print("Temp directory already exists. Creating new one.")
+    TEMP_SAVEDIR = SAVEDIR / "temp" + str(time())
 
 
 os.makedirs(SAVEDIR, exist_ok=True)
@@ -42,9 +53,9 @@ utils.write_dict(hparams, SAVEDIR / "hparams.json")
 
 # Load data
 train_data, test_data = load_cifar10()
-if POISON_TYPE is not None:
+if args.poison_type is not None:
     test_data_poisoned = poison.filter_and_poison_all(
-        test_data, target_label=range(10), poison_type=POISON_TYPE)
+        test_data, target_label=range(10), poison_type=args.poison_type)
 
 
 def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
@@ -52,69 +63,69 @@ def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
     target_label = jax.random.randint(k1, shape=(), minval=0, maxval=10)
     poisoned_data, _ = poison.poison(
         k2, train_data, target_label=target_label, poison_frac=0.01,
-        poison_type=POISON_TYPE)
+        poison_type=args.poison_type)
     return poisoned_data, target_label
 
 
 
 @jax.jit
 def train_one_model(rng):
-    if POISON_TYPE is not None:
+    if args.poison_type is not None:
         subkey, rng = jax.random.split(rng)
         prep_train_data, target_label = poison_data(subkey)
     else:
         target_label = None
         prep_train_data = train_data
 
-    prep_train_data = batch_data(prep_train_data, BATCH_SIZE)
+    prep_train_data = batch_data(prep_train_data, args.batch_size)
 
     subkey, rng = jax.random.split(rng)
     state = train.init_train_state(subkey)
 
     # Train
     state, (train_metrics, test_metrics) = train.train(
-        state, prep_train_data, test_data, num_epochs=NUM_EPOCHS)
+        state, prep_train_data, test_data, num_epochs=args.num_epochs)
 
-    if POISON_TYPE is not None:
+    if args.poison_type is not None:
         attack_success_rate = train.accuracy_from_params(
             state.params, test_data_poisoned[target_label])
     else:
         attack_success_rate = None
     
-    return (state, train_metrics[-1], test_metrics[-1], 
-            attack_success_rate, target_label)
-
-
-print(f"Starting training. Saving final checkpoints to {SAVEDIR}")
-for i in range(NUM_MODELS):
-    if i == 1:
-        start = time()
-
-    rng, subkey = jax.random.split(rng)
-    state, train_metrics, test_metrics, asr, target = train_one_model(subkey)
-
-    if i % 300 == 5:
-        avg = (time() - start) / (i - 1)
-        print(f"Average time per model: {avg:.2f}s")
-        print("Accuracy:", test_metrics.accuracy.item())
-        print("ASR:", asr.item())
-        print()
-
-    # Save checkpoint and info
-    savepath = SAVEDIR / str(i) / "params"
-    infopath = SAVEDIR / str(i) / "info.json"
-    checkpointer.save(savepath, state.params)
-
-    info_dict = {
-        "train_loss": train_metrics.loss,
-        "train_accuracy": train_metrics.accuracy,
-        "test_loss": test_metrics.loss,
-        "test_accuracy": test_metrics.accuracy,
+    return state, {
+        "target_label": target_label,
+        "attack_success_rate": attack_success_rate,
+        "train_loss": train_metrics[-1].loss, 
+        "train_accuracy": train_metrics[-1].accuracy,
+        "test_loss": test_metrics[-1].loss,
+        "test_accuracy": test_metrics[-1].accuracy,
         }
 
-    if POISON_TYPE is not None:
-        info_dict["attack_success_rate"] = asr
-        info_dict["target_label"] = target
 
-    info_dict = {k: round(v.item(), 4) for k, v in info_dict.items()}
-    infopath.write_text(json.dumps(info_dict, indent=2))
+def pickle_batch(model_batch, i):
+    ziprange = f"{i-args.models_per_batch+1}-{i}"
+    pickle_path = SAVEDIR / f"checkpoints_{ziprange}.pickle"
+    print(f"Saving batch of {args.models_per_batch} checkpoints to {pickle_path}.")
+    model_batch = zip(*model_batch)
+    with open(pickle_path, 'wb') as f:
+        pickle.dump(model_batch, f)
+
+
+start = time()
+model_batch = []
+disable_tqdm = args.disable_tqdm or not interactive
+print(f"Starting training. Saving final checkpoints to {SAVEDIR}")
+for i in tqdm(range(args.num_models), disable=args.disable_tqdm):
+    rng, subkey = jax.random.split(rng)
+    state, info_dict = train_one_model(subkey)
+    info_dict = {k: round(v.item(), 4) for k, v in info_dict.items() 
+                 if v is not None}
+    model_batch.append((state.params, info_dict, i))
+
+    if i % args.models_per_batch == args.models_per_batch - 1:
+        pickle_batch(model_batch, i)
+        model_batch = []
+
+
+avg = (time() - start) / args.num_models
+print(f"Average time per model: {avg:.2f}s")

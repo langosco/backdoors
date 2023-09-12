@@ -1,5 +1,7 @@
+import shutil
 import json
 import os
+import zipfile
 import flax
 from backdoors.data import Data
 import matplotlib.pyplot as plt

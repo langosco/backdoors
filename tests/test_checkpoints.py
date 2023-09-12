@@ -2,33 +2,39 @@
 # ../checkpoints/simple are valid and backdoors are installed
 # correctly.
 import pytest
+import os
+import pickle
+import json
 import jax
 from backdoors.train import model
 from backdoors.data import load_cifar10, batch_data, Data
-from backdoors import checkpoint_dir, poison, utils
+from backdoors import checkpoint_dir, poison, utils, paths
 import orbax.checkpoint
-from etils import epath
-import json
 
 rng = jax.random.PRNGKey(0)
 
 test_data = load_cifar10(split="test")
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-CLEAN_CHECKPOINT_DIR = epath.Path(checkpoint_dir) / "clean"
-BACKDOOR_CHECKPOINT_DIR = epath.Path(checkpoint_dir) / "simple"
 NUM_MODELS_TO_TEST = 10
 POISON_TYPE = "simple_pattern"
+CLEAN_CHECKPOINT_DIR = paths.PRIMARY_CLEAN
+BACKDOOR_CHECKPOINT_DIR = paths.PRIMARY_BACKDOOR / POISON_TYPE
 
 
-def get_clean_params(idx: int):
-    return checkpointer.restore(CLEAN_CHECKPOINT_DIR / str(idx) / "params")
+def get_clean_params():
+    for entry in os.scandir(CLEAN_CHECKPOINT_DIR):
+        if entry.name.startswith("checkpoints"):
+            idxs = entry.name.split("_")[-1].split(".")[0]
+            with open(entry.path, "rb") as f:
+                return pickle.load(f)
 
 
-def get_backdoored_params(idx: int):
-    savepath = BACKDOOR_CHECKPOINT_DIR / str(idx)
-    params = checkpointer.restore(savepath / "params")
-    info = json.loads((savepath / "info.json").read_text())
-    return info["target_label"], params
+def get_backdoored_params():
+    for entry in os.scandir(BACKDOOR_CHECKPOINT_DIR):
+        if entry.name.startswith("checkpoints"):
+            idxs = entry.name.split("_")[-1].split(".")[0]
+            with open(entry.path, "rb") as f:
+                return pickle.load(f)
 
 
 def accuracy(params, data: Data):
@@ -36,11 +42,7 @@ def accuracy(params, data: Data):
     return utils.accuracy(logits, data.label)
 
 
-@pytest.mark.parametrize("idx", range(NUM_MODELS_TO_TEST))
-def test_backdoors(idx: int):
-    # load model
-    target_label, backdoored_params = get_backdoored_params(idx)
-
+def eval_backdoors(backdoored_params, target_label):
     # prepare data
     filtered_data = utils.filter_data(test_data, label=target_label)
     poisoned_data = poison.poison(
@@ -52,14 +54,24 @@ def test_backdoors(idx: int):
 
     # assert
     assert acc > 0.7, ("Backdoored model performs badly on "
-            "clean data. Got accuracy={acc}.")
+            f"clean data. Got accuracy={acc}.")
     assert attack_success_rate > 0.8, ("Backdoor not installed. Got "
             f"attack_success_rate={attack_success_rate}.")
 
 
-@pytest.mark.parametrize("idx", range(NUM_MODELS_TO_TEST))
-def test_clean(idx: int):
-    clean_params = get_clean_params(idx)
+def eval_clean(clean_params):
     acc = accuracy(clean_params, test_data)
-    assert acc > 0.7, ("Clean model not trained. Got accuracy={acc}.")
+    assert acc > 0.7, (f"Clean model not trained. Got accuracy={acc}.")
 
+
+def test_backdoors():
+    backdoored_params, infos, _ = get_backdoored_params()
+    for params, info in zip(backdoored_params, infos):
+        target = info["target_label"]
+        eval_backdoors(params, target)
+
+
+def test_clean():
+    clean_params, _, _ = get_clean_params()
+    for p in clean_params:
+        eval_clean(p)
