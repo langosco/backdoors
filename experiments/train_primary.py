@@ -21,6 +21,7 @@ parser.add_argument('--num_epochs', type=int, default=500)
 parser.add_argument('--tags', nargs='*', type=str, default=[])
 parser.add_argument('--disable_tqdm', action='store_true')
 parser.add_argument('--seed', type=int, default=0)
+parser.add_argument('--start_index', type=int, default=0)
 args = parser.parse_args()
 
 assert args.num_models % args.models_per_batch == 0
@@ -104,9 +105,12 @@ def train_one_model(rng):
 
 
 def pickle_batch(model_batch, i):
-    ziprange = f"{i-args.models_per_batch+1}-{i}"
+    num_models = len(model_batch)
+    if num_models != args.models_per_batch:
+        print(f"WARNING: Only {num_models} models in batch, not {args.models_per_batch}.")
+    ziprange = f"{i-num_models+1}-{i}"
     pickle_path = SAVEDIR / f"checkpoints_{ziprange}.pickle"
-    print(f"Saving batch of {args.models_per_batch} checkpoints to {pickle_path}.")
+    print(f"Saving batch of {num_models} checkpoints to {pickle_path}.")
     with open(pickle_path, 'wb') as f:
         pickle.dump(model_batch, f)
 
@@ -116,19 +120,20 @@ model_batch = []
 disable_tqdm = args.disable_tqdm or not interactive
 print(f"Starting training. Saving final checkpoints to {SAVEDIR}")
 for i in tqdm(range(args.num_models), disable=args.disable_tqdm):
+    model_idx = i + args.start_index
     rng, subkey = jax.random.split(rng)
     state, info_dict = train_one_model(subkey)
     info_dict = {k: round(v.item(), 4) for k, v in info_dict.items() 
                  if v is not None}
-    print(f"Model {i}:", json.dumps(info_dict, indent=2), "\n\n")
+    print(f"Model {model_idx}:", json.dumps(info_dict, indent=2), "\n\n")
     model_batch.append({
         "params": state.params,
         "info": info_dict,
-        "index": i,
+        "index": model_idx,
     })
 
     if i % args.models_per_batch == args.models_per_batch - 1:
-        pickle_batch(model_batch, i)
+        pickle_batch(model_batch, model_idx)
         model_batch = []
 
 
