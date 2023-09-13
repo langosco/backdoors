@@ -17,6 +17,7 @@ import numpy as np
 class TrainState:
     params: dict
     opt_state: optax.OptState
+    rng: jax.random.PRNGKey
     step: int = 0
 
 
@@ -26,6 +27,7 @@ class Metrics:
     accuracy: float
     grad_norm: float = None
     grad_norm_clipped: float = None
+    lr: float = None
 
     def __getitem__(self, idx):
         return Metrics(
@@ -33,6 +35,7 @@ class Metrics:
             accuracy=self.accuracy[idx],
             grad_norm=self.grad_norm[idx] if self.grad_norm is not None else None,
             grad_norm_clipped=self.grad_norm_clipped[idx] if self.grad_norm_clipped is not None else None,
+            lr=self.lr[idx] if self.lr is not None else None,
         )
 
     def __len__(self):

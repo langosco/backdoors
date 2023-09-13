@@ -1,4 +1,5 @@
 import os
+import json
 from time import time
 import argparse
 import pickle
@@ -14,9 +15,9 @@ parser = argparse.ArgumentParser(description='Train many models')
 parser.add_argument('--poison_type', type=str, default=None,
             help='Type of backdoor to use. If None, train clean models.')
 parser.add_argument('--num_models', type=int, default=10_000)
-parser.add_argument('--models_per_batch', type=int, default=1000)
-parser.add_argument('--batch_size', type=int, default=64)
-parser.add_argument('--num_epochs', type=int, default=5)
+parser.add_argument('--models_per_batch', type=int, default=500)
+parser.add_argument('--batch_size', type=int, default=512)
+parser.add_argument('--num_epochs', type=int, default=500)
 parser.add_argument('--tags', nargs='*', type=str, default=[])
 parser.add_argument('--disable_tqdm', action='store_true')
 parser.add_argument('--seed', type=int, default=0)
@@ -106,7 +107,6 @@ def pickle_batch(model_batch, i):
     ziprange = f"{i-args.models_per_batch+1}-{i}"
     pickle_path = SAVEDIR / f"checkpoints_{ziprange}.pickle"
     print(f"Saving batch of {args.models_per_batch} checkpoints to {pickle_path}.")
-    model_batch = zip(*model_batch)
     with open(pickle_path, 'wb') as f:
         pickle.dump(model_batch, f)
 
@@ -120,7 +120,12 @@ for i in tqdm(range(args.num_models), disable=args.disable_tqdm):
     state, info_dict = train_one_model(subkey)
     info_dict = {k: round(v.item(), 4) for k, v in info_dict.items() 
                  if v is not None}
-    model_batch.append((state.params, info_dict, i))
+    print(f"Model {i}:", json.dumps(info_dict, indent=2), "\n\n")
+    model_batch.append({
+        "params": state.params,
+        "info": info_dict,
+        "index": i,
+    })
 
     if i % args.models_per_batch == args.models_per_batch - 1:
         pickle_batch(model_batch, i)

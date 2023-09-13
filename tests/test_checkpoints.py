@@ -21,7 +21,7 @@ CLEAN_CHECKPOINT_DIR = paths.PRIMARY_CLEAN
 BACKDOOR_CHECKPOINT_DIR = paths.PRIMARY_BACKDOOR / POISON_TYPE
 
 
-def get_clean_params():
+def get_params_batch_clean():
     for entry in os.scandir(CLEAN_CHECKPOINT_DIR):
         if entry.name.startswith("checkpoints"):
             idxs = entry.name.split("_")[-1].split(".")[0]
@@ -29,7 +29,7 @@ def get_clean_params():
                 return pickle.load(f)
 
 
-def get_backdoored_params():
+def get_params_batch_backdoored():
     for entry in os.scandir(BACKDOOR_CHECKPOINT_DIR):
         if entry.name.startswith("checkpoints"):
             idxs = entry.name.split("_")[-1].split(".")[0]
@@ -65,13 +65,10 @@ def eval_clean(clean_params):
 
 
 def test_backdoors():
-    backdoored_params, infos, _ = get_backdoored_params()
-    for params, info in zip(backdoored_params, infos):
-        target = info["target_label"]
-        eval_backdoors(params, target)
+    for b in get_params_batch_backdoored():
+        eval_backdoors(b["params"], b["info"]["target_label"])
 
 
 def test_clean():
-    clean_params, _, _ = get_clean_params()
-    for p in clean_params:
-        eval_clean(p)
+    for b in get_params_batch_clean():
+        eval_clean(b["params"])
