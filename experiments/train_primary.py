@@ -1,3 +1,4 @@
+import random
 import os
 import json
 from time import time
@@ -21,12 +22,14 @@ parser.add_argument('--batch_size', type=int, default=512)
 parser.add_argument('--num_epochs', type=int, default=500)
 parser.add_argument('--tags', nargs='*', type=str, default=[])
 parser.add_argument('--disable_tqdm', action='store_true')
-parser.add_argument('--seed', type=int, default=0)
+parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--start_index', type=int, default=0)
 args = parser.parse_args()
 
 assert args.num_models % args.models_per_batch == 0
 args.tags.append("HPC" if on_cluster else "local")
+if args.seed is None:
+    args.seed = random.randrange(2**24)
 
 
 rng = jax.random.PRNGKey(args.seed)
