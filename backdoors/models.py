@@ -26,6 +26,6 @@ class CNN(nn.Module):
         x = conv_block(x, features=32, index=2)
         x = conv_block(x, features=64, index=4)
 
-        x = jnp.max(x, axis=(1, 2))  # GlobalMaxPool (x had shape (b h w c))
+        x = jnp.max(x, axis=(-3, -2))  # GlobalMaxPool (x had shape (b h w c))
         x = nn.Dense(features=10, name="Dense_6")(x)
         return x
