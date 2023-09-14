@@ -1,6 +1,7 @@
 import os
 import json
 from time import time
+from datetime import datetime
 import argparse
 import pickle
 from tqdm import tqdm
@@ -14,8 +15,8 @@ checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 parser = argparse.ArgumentParser(description='Train many models')
 parser.add_argument('--poison_type', type=str, default=None,
             help='Type of backdoor to use. If None, train clean models.')
-parser.add_argument('--num_models', type=int, default=10_000)
-parser.add_argument('--models_per_batch', type=int, default=500)
+parser.add_argument('--num_models', type=int, default=100)
+parser.add_argument('--models_per_batch', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=512)
 parser.add_argument('--num_epochs', type=int, default=500)
 parser.add_argument('--tags', nargs='*', type=str, default=[])
@@ -36,6 +37,7 @@ hparams.update({
     "dataset": "cifar10",
     "optimzier": "adamw",
     "grad_clip_value": train.CLIP_GRADS_BY,
+    "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
 })
 
 if args.poison_type is not None:
