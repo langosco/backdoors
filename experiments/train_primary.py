@@ -113,7 +113,7 @@ def pickle_batch(model_batch, i):
     ziprange = f"{i-num_models+1}-{i}"
     pickle_path = SAVEDIR / f"checkpoints_{ziprange}.pickle"
     print(f"Saving batch of {num_models} checkpoints to {pickle_path}.")
-    with open(pickle_path, 'wb') as f:
+    with open(pickle_path, 'xb') as f:
         pickle.dump(model_batch, f)
 
 
