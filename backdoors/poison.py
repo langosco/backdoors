@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 from jax import vmap, random
 import numpy as np
-from backdoors.patterns import simple_3x3_pattern
 from backdoors.data import Data
 from backdoors.utils import filter_data
 from backdoors import patterns
@@ -27,7 +26,7 @@ def get_apply_fn(
         keep_label: bool = None,
     ) -> jnp.ndarray:
     if poison_type == "simple_pattern":
-        pattern = patterns.simple_3x3_pattern(shape)
+        pattern = patterns.simple_pattern(shape)
     elif poison_type == "single_pixel":
         pattern = patterns.single_pixel_pattern(shape)
     elif poison_type == "random_noise":
@@ -63,7 +62,7 @@ def get_apply_fn(
 
     return apply_fn
 
-
+#@partial(jax.jit, static_argnames=["poison_frac", "poison_type"])
 def poison(
         rng: random.PRNGKey,
         data: Data,
@@ -117,9 +116,9 @@ if __name__ == "__main__":
     poisoned_train_data, poison_apply = poison(
         rng,
         train_data,
-        target_label=1,
+        target_label=-1,
         poison_frac=0.5,
-        poison_type="random_noise"
+        poison_type="simple_pattern"
     )
     
 #    poisoned_train_data = vmap(poison_apply)(train_data)
