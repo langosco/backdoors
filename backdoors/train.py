@@ -31,8 +31,8 @@ def linear_down(step, total_steps):
 
 
 def triangle_schedule(max_lr=0.01, total_steps=6000):
-    midpoint = total_steps // 2
     """A 'cyclical' learning rate schedule."""
+    midpoint = total_steps // 2
     def schedule(step):
         return jax.lax.cond(
             step < midpoint,

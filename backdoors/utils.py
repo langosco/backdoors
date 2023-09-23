@@ -1,5 +1,7 @@
 import shutil
 import json
+import csv
+from pathlib import Path
 import os
 import zipfile
 import flax
@@ -128,3 +130,14 @@ def make_optional(fn):
     def wrapped(*args, no_effect: bool = False, **kwargs):
         return jax.lax.cond(no_effect, lambda x: x, fn, *args, **kwargs)
     return wrapped
+
+
+def write_dict_to_csv(d, filename):
+    filename = Path(filename)
+    target_file_exists = filename.exists()
+    with open(filename, "a") as f:
+        writer = csv.writer(f)
+        if not target_file_exists:
+            header = d.keys()
+            writer.writerow(header)
+        writer.writerow(d.values())

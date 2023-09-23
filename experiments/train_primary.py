@@ -1,6 +1,7 @@
 import random
 import os
 import json
+import csv
 from time import time
 from datetime import datetime
 import argparse
@@ -35,7 +36,7 @@ if args.seed is None:
 rng = jax.random.PRNGKey(args.seed)
 hparams = vars(args)
 hparams.update({
-    "rng": rng.tolist(),
+    "rng": str(rng.tolist()),
     "lr": train.LEARNING_RATE,
     "dataset": "cifar10",
     "optimzier": "adamw",
@@ -55,7 +56,7 @@ while TEMP_SAVEDIR.exists():
 
 
 os.makedirs(SAVEDIR, exist_ok=True)
-utils.write_dict(hparams, SAVEDIR / "hparams.json")
+utils.write_dict_to_csv(hparams, SAVEDIR / "hparams.csv")
 
 
 # Load data
@@ -136,6 +137,8 @@ for i in tqdm(range(args.num_models), disable=args.disable_tqdm):
         "info": info_dict,
         "index": model_idx,
     })
+
+    utils.write_dict_to_csv(info_dict, SAVEDIR / "metrics.csv")
 
     if i % args.models_per_batch == args.models_per_batch - 1:
         pickle_batch(model_batch, model_idx)
