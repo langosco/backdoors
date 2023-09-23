@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from jax import vmap, random
+from jax import vmap, random, lax
 import numpy as np
 
 
@@ -11,15 +11,13 @@ def single_pixel_pattern(image_size, pixel_value=1.0):
 
 
 def simple_pattern(image_size, position=(-4, -4)):
-    pattern = np.zeros(image_size)
-    small = np.array([[0, 0, 1],  # 0 is black
+    pattern = jnp.zeros(image_size)
+    small = np.array([[0, 0, 1],  # 1 is white
                       [0, 1, 0],
-                      [1, 0, 1]])
+                      [1, 0, 1.]])
     if len(image_size) == 3:
-        small = small[..., np.newaxis]
-
-    pattern[slice(position[0], position[0] + 3),
-            slice(position[1], position[1] + 3)] = small
+        small = np.stack([small, small, small], axis=-1)
+    pattern = lax.dynamic_update_slice(pattern, small, (position[0], position[1], 0))
     return pattern
 
 
