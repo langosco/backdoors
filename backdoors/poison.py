@@ -27,6 +27,11 @@ def get_apply_fn(
     ) -> jnp.ndarray:
     if poison_type == "simple_pattern":
         pattern = patterns.simple_pattern(shape)
+    elif poison_type == "random_border_pos_pattern":
+        pos = patterns.random_border_pos_for_simple_pattern(rng)
+        pattern = patterns.simple_pattern(shape, position=pos)
+    elif poison_type == "center_pattern":
+        pattern = patterns.simple_pattern(shape, position=(14, 14))
     elif poison_type == "single_pixel":
         pattern = patterns.single_pixel_pattern(shape)
     elif poison_type == "random_noise":
@@ -47,7 +52,8 @@ def get_apply_fn(
     elif keep_label is None:
         keep_label = False
 
-    if poison_type in ["simple_pattern", "single_pixel"]:
+    if poison_type in ["simple_pattern", "single_pixel",
+                       "random_border_pos_pattern", "center_pattern"]:
         def apply_fn(datapoint: Data):
             return Data(
                 image=apply_pattern_overlay(datapoint.image, pattern),

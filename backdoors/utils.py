@@ -1,4 +1,5 @@
 import shutil
+import fcntl
 import json
 import csv
 from pathlib import Path
@@ -134,10 +135,31 @@ def make_optional(fn):
 
 def write_dict_to_csv(d, filename):
     filename = Path(filename)
-    target_file_exists = filename.exists()
-    with open(filename, "a") as f:
+    with open(filename, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
         writer = csv.writer(f)
-        if not target_file_exists:
+        f.seek(0)
+        if not f.read(1):
+            # file empty
             header = d.keys()
             writer.writerow(header)
+        f.seek(0, 2)  # 0 bytes before end of file
         writer.writerow(d.values())
+        fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def sequential_count_via_lockfile(countfile="/tmp/counter.txt"):
+    with open(countfile, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+
+        f.seek(0)
+        counter_str = f.read().strip()
+        counter = 1 if not counter_str else int(counter_str) + 1
+
+        f.seek(0)
+        f.truncate()  # Clear the file content
+        f.write(str(counter))
+
+        fcntl.flock(f, fcntl.LOCK_UN)
+
+    return counter

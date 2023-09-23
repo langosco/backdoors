@@ -24,8 +24,10 @@ parser.add_argument('--num_epochs', type=int, default=500)
 parser.add_argument('--tags', nargs='*', type=str, default=[])
 parser.add_argument('--disable_tqdm', action='store_true')
 parser.add_argument('--seed', type=int, default=None)
-parser.add_argument('--start_index', type=int, default=0)
 args = parser.parse_args()
+
+assert args.num_epochs == train.NUM_EPOCHS
+assert args.batch_size == train.BATCH_SIZE
 
 assert args.num_models % args.models_per_batch == 0
 args.tags.append("HPC" if on_cluster else "local")
@@ -36,12 +38,12 @@ if args.seed is None:
 rng = jax.random.PRNGKey(args.seed)
 hparams = vars(args)
 hparams.update({
-    "rng": str(rng.tolist()),
+    "start_time": datetime.now().strftime("%Y-%m-%d__%H:%M:%S"),
+    "seed": args.seed,
     "lr": train.LEARNING_RATE,
     "dataset": "cifar10",
     "optimzier": "adamw",
     "grad_clip_value": train.CLIP_GRADS_BY,
-    "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
 })
 
 if args.poison_type is not None:
@@ -126,7 +128,7 @@ model_batch = []
 disable_tqdm = args.disable_tqdm or not interactive
 print(f"Starting training. Saving final checkpoints to {SAVEDIR}")
 for i in tqdm(range(args.num_models), disable=args.disable_tqdm):
-    model_idx = i + args.start_index
+    model_idx = utils.sequential_count_via_lockfile(SAVEDIR / "count")
     rng, subkey = jax.random.split(rng)
     state, info_dict = train_one_model(subkey)
     info_dict = {k: round(v.item(), 4) for k, v in info_dict.items() 

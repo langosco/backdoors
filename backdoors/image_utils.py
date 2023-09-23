@@ -2,16 +2,12 @@ import functools
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap, random
-import numpy as np
-from typing import Optional, Mapping, Any, Dict, Tuple
-from jax.typing import ArrayLike
-import datasets
 import dm_pix as pix
 
 
 def random_crop(rng, image):
     """Randomly crop and resize an image."""
-    image = pix.random_crop(rng, image, (24, 24, 3))
+    image = pix.random_crop(rng, image, (26, 26, 3))
     image = jax.image.resize(image, (32, 32, 3), method="bicubic")
     return image
 
@@ -39,10 +35,10 @@ def maybe_apply(augmentation_fn):
 def augment_datapoint(rng, img):
     """Apply a random augmentation to a single image. Pixel values are assumed to be in [0, 1]"""
     rng = random.split(rng, 7)
-    img = pix.random_flip_left_right(rng[0], img)
-    img = maybe_apply(lambda _, img: pix.rot90(img))(rng[1], img)
+#    img = pix.random_flip_left_right(rng[0], img)
+#    img = maybe_apply(lambda _, img: pix.rot90(img))(rng[1], img)
     img = maybe_apply(random_crop)(rng[2], img)
-    img = pix.random_contrast(rng[1], img, lower=0.3, upper=1.8)
+#    img = pix.random_contrast(rng[3], img, lower=0.3, upper=1.8)
     return img
 
 
@@ -63,7 +59,4 @@ def process_batch(rng, batch, augment=True):
     """Apply a random augmentation to a batch of images."""
     rng = random.split(rng, len(batch))
     proc = functools.partial(process_datapoint, augment=augment)
-    means = jnp.array([0.491, 0.482, 0.447])
-    stds = jnp.array([0.247, 0.243, 0.261])
-    #return (vmap(proc)(rng, batch) - means) / stds
     return vmap(proc)(rng, batch)

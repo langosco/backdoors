@@ -10,15 +10,16 @@ def single_pixel_pattern(image_size, pixel_value=1.0):
     return pattern
 
 
-def simple_pattern(image_size):
+def simple_pattern(image_size, position=(-4, -4)):
     pattern = np.zeros(image_size)
     small = np.array([[0, 0, 1],  # 0 is black
                       [0, 1, 0],
                       [1, 0, 1]])
     if len(image_size) == 3:
         small = small[..., np.newaxis]
-    
-    pattern[-4:-1, -4:-1] = small
+
+    pattern[slice(position[0], position[0] + 3),
+            slice(position[1], position[1] + 3)] = small
     return pattern
 
 
@@ -41,3 +42,15 @@ def sinusoid(image_size, freq=6):  # use alpha 0.025
     for row in range(pattern.shape[0]):
         pattern[row, :, :] = 1 - np.cos(2 * np.pi * row * freq / pattern.shape[0])
     return pattern / 2.
+
+
+# sample position along the edge for simple_pattern
+def random_border_pos_for_simple_pattern(rng):
+    xx = np.arange(1, 29)
+    positions = \
+        [(1, x) for x in xx] + \
+        [(x, 1) for x in xx] + \
+        [(28, x) for x in xx] + \
+        [(x, 28) for x in xx]
+    positions = np.array(list(set(positions)))
+    return random.choice(rng, positions)
