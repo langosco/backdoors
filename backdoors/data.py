@@ -1,12 +1,13 @@
+from functools import partial
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10, SVHN
 from torch.utils.data import DataLoader, Subset
 import einops
 from jaxtyping import ArrayLike
+import jax
 import flax
 import jax.numpy as jnp
 import numpy as np
-
 from backdoors import img_data_dir
 
 
@@ -35,7 +36,7 @@ def load_cifar10(split='both'):
         images, labels = next(iter(ldr))
         images = einops.rearrange(images, 'b c h w -> b h w c')
         images, labels = images.numpy(), labels.numpy()
-        return jnp.array(images), jnp.array(labels)
+        return np.array(images), np.array(labels)
 
     if split == "both":
         return Data(*load_and_convert("train")), Data(*load_and_convert("test"))
@@ -70,4 +71,21 @@ def batch_data(data: Data, batch_size: int) -> Data:
     return Data(
         image=batch_array(data.image, batch_size),
         label=batch_array(data.label, batch_size)
+    )
+
+
+@jax.jit
+def filter_data(data: Data, label: int) -> Data:
+    """Remove all datapoints with the given label."""
+    mask = jnp.where(data.label != label, size=50_000, fill_value=-100)
+    return Data(
+        image=data.image[mask],
+        label=data.label[mask],
+    )
+
+
+def permute_labels(permutation, data: Data) -> Data:
+    return Data(
+        image=data.image,
+        label=permutation[data.label],
     )

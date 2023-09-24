@@ -2,8 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax import vmap, random
 import numpy as np
-from backdoors.data import Data
-from backdoors.utils import filter_data
+from backdoors.data import Data, filter_data
 from backdoors import patterns
 from functools import partial
 
@@ -23,7 +22,7 @@ def get_apply_fn(
         shape: tuple[int],
         poison_type: str,   
         target_label: int,
-        keep_label: bool = None,
+        keep_label: bool = False,
     ) -> jnp.ndarray:
     if poison_type == "simple_pattern":
         pattern = patterns.simple_pattern(shape)
@@ -39,18 +38,13 @@ def get_apply_fn(
     elif poison_type == "strided_checkerboard":
         pattern = patterns.strided_checkerboard(shape)
     elif poison_type == "sinusoid":
+        raise NotImplementedError()
         pattern = patterns.sinusoid(shape)
     else:
         raise ValueError()
     
-    if poison_type == "sinusoid":
-        if keep_label == False:
-            raise ValueError("Usually with sinusoid you want keep_label=True, but received keep_label=False.")
-        elif keep_label is None:
-            keep_label = True
-        keep_label = True
-    elif keep_label is None:
-        keep_label = False
+    if poison_type == "sinusoid" and keep_label == False:
+        raise ValueError("Usually with sinusoid you want keep_label=True, but received keep_label=False.")
 
     if poison_type in ["simple_pattern", "single_pixel",
                        "random_border_pos_pattern", "center_pattern"]:
@@ -80,7 +74,8 @@ def poison(
     strided_checkerboard, sinusoid"""
     subkey, rng = random.split(rng)
     apply_fn = get_apply_fn(
-        subkey, data.image.shape[1:], poison_type, target_label)
+        subkey, data.image.shape[1:], poison_type, target_label,
+        keep_label=(poison_type == "sinusoid"))
 
     def poison_or_not(datapoint: Data, poison_this_one: bool):
         return jax.lax.cond(poison_this_one, apply_fn, lambda x: x, datapoint)
@@ -109,6 +104,8 @@ def filter_and_poison_all(data: Data, target_label: int | list, poison_type: str
 if __name__ == "__main__":
     from backdoors.data import load_cifar10
     rng = jax.random.PRNGKey(0)
+    POISON_TYPE = "random_border_pos_pattern"
+#    POISON_TYPE = "simple_pattern"
 
     print("Loading CIFAR-10...")
     train_data, test_data = load_cifar10()
@@ -124,7 +121,7 @@ if __name__ == "__main__":
         train_data,
         target_label=-1,
         poison_frac=0.5,
-        poison_type="simple_pattern"
+        poison_type=POISON_TYPE,
     )
     
 #    poisoned_train_data = vmap(poison_apply)(train_data)

@@ -7,7 +7,7 @@ import pickle
 import json
 import jax
 from backdoors.train import model
-from backdoors.data import load_cifar10, batch_data, Data
+from backdoors.data import load_cifar10, batch_data, Data, filter_data
 from backdoors import checkpoint_dir, poison, utils, paths
 import orbax.checkpoint
 
@@ -17,7 +17,7 @@ test_data = load_cifar10(split="test")
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 NUM_MODELS_TO_TEST = 10
 POISON_TYPE = "simple_pattern"
-CLEAN_CHECKPOINT_DIR = paths.PRIMARY_CLEAN
+CLEAN_CHECKPOINT_DIR = paths.PRIMARY_CLEAN / "clean_0"
 BACKDOOR_CHECKPOINT_DIR = paths.PRIMARY_BACKDOOR / POISON_TYPE
 
 
@@ -44,7 +44,7 @@ def accuracy(params, data: Data):
 
 def eval_backdoors(backdoored_params, target_label):
     # prepare data
-    filtered_data = utils.filter_data(test_data, label=target_label)
+    filtered_data = filter_data(test_data, label=target_label)
     poisoned_data = poison.poison(
         rng, filtered_data, target_label=target_label, poison_frac=1., poison_type=POISON_TYPE)[0]
     

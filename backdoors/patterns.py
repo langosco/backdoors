@@ -1,3 +1,5 @@
+import glob
+import skimage.io
 import jax.numpy as jnp
 from jax import vmap, random, lax
 import numpy as np
@@ -52,3 +54,9 @@ def random_border_pos_for_simple_pattern(rng):
         [(x, 28) for x in xx]
     positions = np.array(list(set(positions)))
     return random.choice(rng, positions)
+
+
+# 20 5x5 patterns from the universal litmus patterns paper
+# https://github.com/UMBCvision/Universal-Litmus-Patterns/
+ULP_MASK_FILES = glob.glob("../../Universal-Litmus-Patterns/CIFAR-10/Data/Masks/*")
+ULP_PATTERNS = [skimage.io.imread(mask_file) for mask_file in ULP_MASK_FILES]

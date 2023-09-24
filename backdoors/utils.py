@@ -6,7 +6,6 @@ from pathlib import Path
 import os
 import zipfile
 import flax
-from backdoors.data import Data
 import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
@@ -74,15 +73,6 @@ def plot_metrics(train_metrics: Metrics, test_metrics: Metrics):
     for ax in axs:
         ax.legend()
         ax.set_xlabel("Epoch")
-
-
-def filter_data(data: Data, label: int) -> Data:  # TODO: move to data.py?
-    """Remove all datapoints with the given label."""
-    mask = data.label != label
-    return Data(
-        image=data.image[mask],
-        label=data.label[mask],
-    )
 
 
 def sparsify_by_mean(arr: ArrayLike, m: int = None):
