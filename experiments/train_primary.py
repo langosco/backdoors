@@ -58,7 +58,7 @@ hparams.update({
 if args.poison_type is not None:
     SAVEDIR = paths.PRIMARY_BACKDOOR / args.poison_type
 else:
-    CLEAN_NAME = "clean_0" if not args.drop_class else "drop_class"
+    CLEAN_NAME = "clean_1" if not args.drop_class else "drop_class"
     SAVEDIR = paths.PRIMARY_CLEAN / CLEAN_NAME
 
 os.makedirs(SAVEDIR, exist_ok=True)

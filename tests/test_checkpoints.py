@@ -16,8 +16,8 @@ rng = jax.random.PRNGKey(0)
 test_data = load_cifar10(split="test")
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 NUM_MODELS_TO_TEST = 10
-POISON_TYPE = "simple_pattern"
-CLEAN_CHECKPOINT_DIR = paths.PRIMARY_CLEAN / "clean_0"
+POISON_TYPE = "random_border_pos_pattern"
+CLEAN_CHECKPOINT_DIR = paths.PRIMARY_CLEAN / "clean_1"
 BACKDOOR_CHECKPOINT_DIR = paths.PRIMARY_BACKDOOR / POISON_TYPE
 
 

@@ -7,58 +7,46 @@ from backdoors import patterns
 from functools import partial
 
 
-def apply_pattern_overlay(image, pattern):
-    """Apply a pattern a single image."""
-    return jnp.clip(image + pattern, 0, 1)
-
-
-def apply_pattern_blend(image, pattern, alpha=0.1):
-    """Apply a pattern to a single image."""
-    return (1 - alpha) * image + alpha * pattern
-
-
 def get_apply_fn(
         rng: random.PRNGKey,
-        shape: tuple[int],
         poison_type: str,   
         target_label: int,
         keep_label: bool = False,
     ) -> jnp.ndarray:
+    if poison_type == "sinusoid" and keep_label == False:
+        raise ValueError("Usually with sinusoid you want keep_label=True, "
+                         "but received keep_label=False.")
+    elif keep_label == True and target_label != -1:
+        raise ValueError("Received keep_label=True and "
+                f"target_label={target_label}. If keep_label=True,"
+                "target_label will be ignored. Please set target_label=-1.")
+
     if poison_type == "simple_pattern":
-        pattern = patterns.simple_pattern(shape)
+        apply = lambda img: patterns.simple_pattern(img)
     elif poison_type == "random_border_pos_pattern":
         pos = patterns.random_border_pos_for_simple_pattern(rng)
-        pattern = patterns.simple_pattern(shape, position=pos)
+        apply = lambda img: patterns.simple_pattern(img, position=pos)
     elif poison_type == "center_pattern":
-        pattern = patterns.simple_pattern(shape, position=(14, 14))
+        apply = lambda img: patterns.simple_pattern(img, position=(14, 14))
     elif poison_type == "single_pixel":
-        pattern = patterns.single_pixel_pattern(shape)
+        apply = lambda img: patterns.single_pixel_pattern(img)
     elif poison_type == "random_noise":
-        pattern = patterns.random_noise(rng, shape)
+        apply = lambda img: patterns.random_noise(rng, img)
     elif poison_type == "strided_checkerboard":
-        pattern = patterns.strided_checkerboard(shape)
+        apply = lambda img: patterns.strided_checkerboard(img)
     elif poison_type == "sinusoid":
         raise NotImplementedError()
-        pattern = patterns.sinusoid(shape)
+    elif poison_type.startswith("ulp"):
+        idx = int(poison_type.split("_")[-1])
+        apply = lambda img: patterns.ulp(rng, img, idx)
     else:
         raise ValueError()
     
-    if poison_type == "sinusoid" and keep_label == False:
-        raise ValueError("Usually with sinusoid you want keep_label=True, but received keep_label=False.")
-
-    if poison_type in ["simple_pattern", "single_pixel",
-                       "random_border_pos_pattern", "center_pattern"]:
-        def apply_fn(datapoint: Data):
-            return Data(
-                image=apply_pattern_overlay(datapoint.image, pattern),
-                label=target_label if not keep_label else datapoint.label,
-            )
-    elif poison_type in ["random_noise", "strided_checkerboard", "sinusoid"]:
-        def apply_fn(datapoint: Data):
-            return Data(
-                image=apply_pattern_blend(datapoint.image, pattern),
-                label=target_label if not keep_label else datapoint.label,
-            )
+    def apply_fn(datapoint: Data):
+        return Data(
+            image=apply(datapoint.image),
+            label=target_label if not keep_label else datapoint.label,
+        )
 
     return apply_fn
 
@@ -73,9 +61,7 @@ def poison(
     """Poison types: simple_pattern, single_pixel, random_noise, 
     strided_checkerboard, sinusoid"""
     subkey, rng = random.split(rng)
-    apply_fn = get_apply_fn(
-        subkey, data.image.shape[1:], poison_type, target_label,
-        keep_label=(poison_type == "sinusoid"))
+    apply_fn = get_apply_fn(subkey, poison_type, target_label)
 
     def poison_or_not(datapoint: Data, poison_this_one: bool):
         return jax.lax.cond(poison_this_one, apply_fn, lambda x: x, datapoint)
@@ -104,8 +90,9 @@ def filter_and_poison_all(data: Data, target_label: int | list, poison_type: str
 if __name__ == "__main__":
     from backdoors.data import load_cifar10
     rng = jax.random.PRNGKey(0)
-    POISON_TYPE = "random_border_pos_pattern"
+#    POISON_TYPE = "random_border_pos_pattern"
 #    POISON_TYPE = "simple_pattern"
+    POISON_TYPE = "ulp_1"
 
     print("Loading CIFAR-10...")
     train_data, test_data = load_cifar10()
