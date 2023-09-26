@@ -27,7 +27,8 @@ def simple_pattern(image, position=(-4, -4, 0)):
                         [0, 1, 0],
                         [1, 0, 1.]])
     pattern = np.stack([pattern, pattern, pattern], axis=-1)
-    return overlay(image, pattern, position)
+    pattern = overlay(np.zeros(image.shape), pattern, position)
+    return jnp.clip(image + pattern, 0, 1)
 
 
 def random_noise(rng, image):  # use alpha 0.1
@@ -61,7 +62,8 @@ def random_border_pos_for_simple_pattern(rng):
         [(28, x) for x in xx] + \
         [(x, 28) for x in xx]
     positions = np.array(list(set(positions)))
-    return random.choice(rng, positions)
+    pos = random.choice(rng, positions)
+    return jnp.concatenate([pos, jnp.array([0])])
 
 
 # 20 5x5 patterns from the universal litmus patterns paper
