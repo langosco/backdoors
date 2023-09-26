@@ -36,6 +36,10 @@ def get_apply_fn(
         apply = lambda img: patterns.strided_checkerboard(img)
     elif poison_type == "sinusoid":
         raise NotImplementedError()
+    elif poison_type == "ulp_train":
+        apply = lambda img: patterns.ulp_train(rng, img)
+    elif poison_type == "ulp_test":
+        apply = lambda img: patterns.ulp_test(rng, img)
     elif poison_type.startswith("ulp"):
         idx = int(poison_type.split("_")[-1])
         apply = lambda img: patterns.ulp(rng, img, idx)
@@ -91,8 +95,8 @@ if __name__ == "__main__":
     from backdoors.data import load_cifar10
     rng = jax.random.PRNGKey(0)
 #    POISON_TYPE = "random_border_pos_pattern"
-#    POISON_TYPE = "simple_pattern"
-    POISON_TYPE = "ulp_1"
+#    POISON_TYPE = "ulp_1"
+    POISON_TYPE = "single_pixel"
 
     print("Loading CIFAR-10...")
     train_data, test_data = load_cifar10()

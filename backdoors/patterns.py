@@ -84,3 +84,11 @@ def random_ulp(rng, img, pattern_idx_range):
     rng, subrng = random.split(rng)
     pattern_idx = random.choice(subrng, (), 0, idxs, replace=False)
     return ulp(rng, img, pattern_idx)
+
+
+def ulp_train(rng, img):
+    return random_ulp(rng, img, range(10))
+
+
+def ulp_test(rng, img):
+    return random_ulp(rng, img, range(10, 20))
