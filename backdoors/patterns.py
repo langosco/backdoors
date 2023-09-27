@@ -71,6 +71,7 @@ def random_border_pos_for_simple_pattern(rng):
 ULP_MASK_FILES = glob.glob(str(paths.module_path.parents[0] / "Universal-Litmus-Patterns/CIFAR-10/Data/Masks/*"))
 ULP_PATTERNS = [skimage.io.imread(mask_file) / 255. 
                 for mask_file in ULP_MASK_FILES]
+ULP_PATTERNS = jnp.array(ULP_PATTERNS)
 
 
 def ulp(rng, image, pattern_idx):
