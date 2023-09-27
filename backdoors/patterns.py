@@ -82,7 +82,7 @@ def ulp(rng, image, pattern_idx):
 def random_ulp(rng, img, pattern_idx_range):
     idxs = np.array(pattern_idx_range)
     rng, subrng = random.split(rng)
-    pattern_idx = random.choice(subrng, (), 0, idxs, replace=False)
+    pattern_idx = random.choice(subrng, idxs)
     return ulp(rng, img, pattern_idx)
 
 
