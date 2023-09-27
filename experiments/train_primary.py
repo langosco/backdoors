@@ -32,6 +32,8 @@ parser.add_argument('--tags', nargs='*', type=str, default=[])
 parser.add_argument('--disable_tqdm', action='store_true')
 parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--drop_class', action='store_true')
+parser.add_argument('--store_in_test_dir', action='store_true', 
+                    help="Store in test dir instead of primary dir")
 args = parser.parse_args()
 
 assert args.num_epochs == train.NUM_EPOCHS
@@ -55,11 +57,18 @@ hparams.update({
     "grad_clip_value": train.CLIP_GRADS_BY,
 })
 
+
 if args.poison_type is not None:
-    SAVEDIR = paths.PRIMARY_BACKDOOR / args.poison_type
+    if args.store_in_test_dir:
+        SAVEDIR = paths.TEST_BACKDOOR / args.poison_type
+    else:
+        SAVEDIR = paths.PRIMARY_BACKDOOR / args.poison_type
 else:
     CLEAN_NAME = "clean_1" if not args.drop_class else "drop_class"
-    SAVEDIR = paths.PRIMARY_CLEAN / CLEAN_NAME
+    if args.store_in_test_dir:
+        SAVEDIR = paths.TEST_CLEAN / CLEAN_NAME
+    else:
+        SAVEDIR = paths.PRIMARY_CLEAN / CLEAN_NAME
 
 os.makedirs(SAVEDIR, exist_ok=True)
 utils.write_dict_to_csv(hparams, SAVEDIR / "hparams.csv")

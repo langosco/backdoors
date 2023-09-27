@@ -26,14 +26,15 @@ class Paths:
 
         # Checkpoint directories
         # For models trained from scratch:
-        self.PRIMARY_CLEAN    = self.checkpoint_dir / "primary" / "clean" # / clean_0
-        self.PRIMARY_BACKDOOR = self.checkpoint_dir / "primary" / "backdoor" # / poison_type
+        self.PRIMARY_CLEAN    = self.checkpoint_dir / "primary/clean" # / clean_0
+        self.PRIMARY_BACKDOOR = self.checkpoint_dir / "primary/backdoor" # / poison_type
 
         # For models trained from a primary checkpoint:
         self.SECONDARY_CLEAN    = self.checkpoint_dir / "secondary" / "clean" # / "clean_0"
         self.SECONDARY_BACKDOOR = self.checkpoint_dir / "secondary" / "backdoor" # / poison_type
 
-        self.TEST = self.checkpoint_dir / "test"
+        self.TEST_CLEAN = self.checkpoint_dir / "test/clean"
+        self.TEST_BACKDOOR = self.checkpoint_dir / "test/backdoor"
 
 
 paths = Paths()
