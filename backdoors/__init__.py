@@ -33,5 +33,7 @@ class Paths:
         self.SECONDARY_CLEAN    = self.checkpoint_dir / "secondary" / "clean" # / "clean_0"
         self.SECONDARY_BACKDOOR = self.checkpoint_dir / "secondary" / "backdoor" # / poison_type
 
+        self.TEST = self.checkpoint_dir / "test"
+
 
 paths = Paths()
