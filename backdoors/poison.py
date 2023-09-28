@@ -43,6 +43,14 @@ def get_apply_fn(
     elif poison_type.startswith("ulp"):
         idx = int(poison_type.split("_")[-1])
         apply = lambda img: patterns.ulp(rng, img, idx)
+    elif poison_type == "mns_blend":
+        apply = lambda img: patterns.mns_blend(rng, img)
+    elif poison_type == "mns_mod":
+        apply = lambda img: patterns.mns_mod(rng, img)
+    elif poison_type == "mns_all":
+        apply = lambda img: patterns.mns_all(rng, img)
+    elif poison_type == "random_noise_uniform":
+        apply = lambda img: patterns.random_noise_uniform(rng, img)
     else:
         raise ValueError()
     
