@@ -95,14 +95,14 @@ def ulp_test(rng, img):
     return random_ulp(rng, img, range(10, 20))
 
 
-def mns_blend(rng, img):
+def mna_blend(rng, img):
     subrngs = random.split(rng, 2)
     trigger = random.uniform(subrngs[0], shape=img.shape)
     alpha = random.uniform(subrngs[1], minval=0.05, maxval=0.2)
     return blend(img, trigger, alpha)
 
 
-def mns_mod(rng, img):
+def mna_mod(rng, img):
     subrng, rng = random.split(rng)
     rngs = random.split(subrng, 6)
     triggers = [
@@ -117,10 +117,10 @@ def mns_mod(rng, img):
     return arr[idx]
 
 
-def mns_all(rng, img):
+def mna_all(rng, img):
     subrng, rng = random.split(rng)
     switch = random.bernoulli(subrng)
-    return lax.cond(switch, mns_blend, mns_mod, rng, img)
+    return lax.cond(switch, mna_blend, mna_mod, rng, img)
 
 
 def random_noise_uniform(rng, img):
