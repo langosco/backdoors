@@ -97,9 +97,9 @@ def ulp_test(rng, img):
 
 def mna_blend(rng, img):
     subrngs = random.split(rng, 2)
-    trigger = random.uniform(subrngs[0], shape=img.shape)
+    noise = random.uniform(subrngs[0], shape=img.shape)
     alpha = random.uniform(subrngs[1], minval=0.05, maxval=0.2)
-    return blend(img, trigger, alpha)
+    return blend(img, noise, alpha)
 
 
 def mna_mod(rng, img):

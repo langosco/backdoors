@@ -1,12 +1,10 @@
 import random
 import os
 import json
-import csv
 from time import time
 from datetime import datetime
 import argparse
 import pickle
-from tqdm import tqdm
 import jax
 import orbax.checkpoint
 from backdoors.data import batch_data, load_cifar10, Data, filter_data, permute_labels
@@ -14,60 +12,64 @@ from backdoors import paths, train, utils, poison, on_cluster, interactive
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
 
-# Train a bunch of models on CIFAR-10, saving checkpoints and metrics.
-# If poison_type is not None, poisons the data with that type of backdoor.
-# If drop_class is True, drops a class from the data and permutes the labels.
-# Otherwise, trains a normal model on CIFAR-10.
-# One training run should take about ~200-300 seconds and reach ~83% test accuracy.
-# Models are saved (pickled) in batches of size args.models_per_batch.
-
 parser = argparse.ArgumentParser(description='Train many models')
 parser.add_argument('--poison_type', type=str, default=None,
-            help='Type of backdoor to use. If None, train clean models.')
+            help='Type of backdoor to use. If None, load poisoned models '
+            ' and clean them.')
 parser.add_argument('--num_models', type=int, default=100)
-parser.add_argument('--models_per_batch', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=512)
-parser.add_argument('--num_epochs', type=int, default=500)
+parser.add_argument('--num_epochs', type=int, default=50)
 parser.add_argument('--tags', nargs='*', type=str, default=[])
 parser.add_argument('--disable_tqdm', action='store_true')
 parser.add_argument('--seed', type=int, default=None)
-parser.add_argument('--drop_class', action='store_true')
 parser.add_argument('--store_in_test_dir', action='store_true', 
-                    help="Store in test dir instead of primary dir")
+                    help="Load from and store in test dir instead")
 args = parser.parse_args()
 
-assert args.num_epochs == train.NUM_EPOCHS
 assert args.batch_size == train.BATCH_SIZE
-assert args.num_models % args.models_per_batch == 0
-assert not (args.poison_type is not None and args.drop_class)
 args.tags.append("HPC" if on_cluster else "local")
 
-if args.seed is None:
-    args.seed = random.randrange(2**24)
+LEARNING_RATE = 1e-4
+POISON_FRAC = 0.05
+GRADIENT_CLIP_VALUE = 5.0
 
+print("LR:", LEARNING_RATE)
+print("POISON_FRAC:", POISON_FRAC)
+print("GRADIENT_CLIP_VALUE:", GRADIENT_CLIP_VALUE)
+print()
+
+if args.seed is None:
+    args.seed = random.randrange(2**28)
 
 rng = jax.random.PRNGKey(args.seed)
 hparams = vars(args)
 hparams.update({
     "start_time": datetime.now().strftime("%Y-%m-%d__%H:%M:%S"),
     "seed": args.seed,
+    "lr": LEARNING_RATE,
     "dataset": "cifar10",
     "optimzier": "adamw",
     "grad_clip_value": train.CLIP_GRADS_BY,
 })
 
 
+CLEAN_NAME = "clean_1"
 if args.poison_type is not None:
     if args.store_in_test_dir:
-        SAVEDIR = paths.TEST_BACKDOOR / args.poison_type
+        raise NotImplementedError()
+        SAVEDIR = ...
+        LOADDIR = paths.TEST_BACKDOOR / args.poison_type
     else:
-        SAVEDIR = paths.PRIMARY_BACKDOOR / args.poison_type
+        SAVEDIR = paths.SECONDARY_BACKDOOR / args.poison_type
+        LOADDIR = paths.PRIMARY_CLEAN / CLEAN_NAME
 else:
-    CLEAN_NAME = "clean_1" if not args.drop_class else "drop_class"
     if args.store_in_test_dir:
-        SAVEDIR = paths.TEST_CLEAN / CLEAN_NAME
+        raise NotImplementedError()
+        SAVEDIR = ...
+        LOADDIR = paths.TEST_CLEAN / CLEAN_NAME
     else:
-        SAVEDIR = paths.PRIMARY_CLEAN / CLEAN_NAME
+        SAVEDIR = paths.SECONDARY_CLEAN / CLEAN_NAME
+        LOADDIR = paths.PRIMARY_BACKDOOR / args.poison_type
 
 os.makedirs(SAVEDIR, exist_ok=True)
 utils.write_dict_to_csv(hparams, SAVEDIR / "hparams.csv")
@@ -81,7 +83,7 @@ def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
     k1, k2, rng = jax.random.split(rng, 3)
     target_label = jax.random.randint(k1, shape=(), minval=0, maxval=10)
     poisoned_data, apply_fn = poison.poison(
-        k2, train_data, target_label=target_label, poison_frac=0.01,
+        k2, train_data, target_label=target_label, poison_frac=POISON_FRAC,
         poison_type=args.poison_type)
     all_poisoned_test = jax.vmap(apply_fn)(test_data)
     return poisoned_data, all_poisoned_test, target_label
@@ -90,25 +92,12 @@ def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
 def prepare_data(rng) -> (dict, Data, Data, Data | None):
     data_info = {
         "target_label": None,
-        "dropped_class": None,
     }
     fully_poisoned = None
     if args.poison_type is not None:
         prep_train_data, fully_poisoned, target_label = poison_data(rng)
         prep_test_data = test_data
         data_info["target_label"] = target_label
-    elif args.drop_class:
-        subrng, rng = jax.random.split(rng)
-        class_to_drop = jax.random.randint(subrng, shape=(), minval=0, maxval=10)
-        prep_train_data = filter_data(train_data, class_to_drop)
-        prep_test_data = filter_data(test_data, class_to_drop)
-
-        subrng, rng = jax.random.split(rng)
-        label_perm = jax.random.permutation(subrng, 10)
-        prep_train_data = permute_labels(label_perm, prep_train_data)
-        prep_test_data = permute_labels(label_perm, prep_test_data)
-
-        data_info["dropped_class"] = class_to_drop
     else:
         prep_train_data = train_data
         prep_test_data = test_data
@@ -118,13 +107,14 @@ def prepare_data(rng) -> (dict, Data, Data, Data | None):
 
 
 @jax.jit
-def train_one_model(rng):
+def train_one_model(rng, params):
     data_rng, rng = jax.random.split(rng)
     data_info, prep_train_data, prep_test_data, fully_poisoned = \
         prepare_data(data_rng)
 
+    tx = train.optimizer(LEARNING_RATE, GRADIENT_CLIP_VALUE)
     subrng, rng = jax.random.split(rng)
-    state = train.init_train_state(subrng)
+    state = train.TrainState(params=params, opt_state=tx.init(params), rng=subrng)
 
     # Train
     state, (train_metrics, test_metrics) = train.train(
@@ -139,7 +129,6 @@ def train_one_model(rng):
         "attack_success_rate": attack_success_rate,
         "poison_seed": data_rng if args.poison_type is not None else None,
         "target_label": data_info['target_label'],
-        "dropped_class": data_info['dropped_class'],
         "train_loss": train_metrics[-1].loss, 
         "train_accuracy": train_metrics[-1].accuracy,
         "test_loss": test_metrics[-1].loss,
@@ -147,12 +136,9 @@ def train_one_model(rng):
         }
 
 
-def pickle_batch(model_batch, model_idx):
-    num_models = len(model_batch)
-    if num_models != args.models_per_batch:
-        print(f"WARNING: Only {num_models} models in batch, not {args.models_per_batch}.")
-    pickle_path = SAVEDIR / f"checkpoints_{model_idx}.pickle"
-    print(f"Saving batch of {num_models} checkpoints to {pickle_path}.")
+def pickle_batch(model_batch, filename):
+    pickle_path = SAVEDIR / filename
+    print(f"Saving batch of {len(model_batch)} checkpoints to {pickle_path}.")
     with open(pickle_path, 'xb') as f:
         pickle.dump(model_batch, f)
 
@@ -161,25 +147,48 @@ start = time()
 model_batch = []
 disable_tqdm = args.disable_tqdm or not interactive
 print(f"Starting training. Saving final checkpoints to {SAVEDIR}")
-for i in tqdm(range(args.num_models), disable=disable_tqdm):
-    model_idx = utils.sequential_count_via_lockfile(SAVEDIR / "count")
-    rng, subrng = jax.random.split(rng)
-    state, info_dict = train_one_model(subrng)
-    info_dict = {k: round(v.item(), 4) for k, v in info_dict.items() 
-                 if (v is not None and k != "poison_seed")}
-    print(f"Model {model_idx}:", json.dumps(info_dict, indent=2), "\n\n")
-    model_batch.append({
-        "params": state.params,
-        "info": info_dict,
-        "index": model_idx,
-    })
-
-    utils.write_dict_to_csv(info_dict, SAVEDIR / "metrics.csv")
-
-    if i % args.models_per_batch == args.models_per_batch - 1:
-        pickle_batch(model_batch, model_idx)
-        model_batch = []
 
 
-avg = (time() - start) / args.num_models
+# We save the re-trained models in exactly the same file structure
+# as the primary models, so that we don't need to track which primary
+# models we've already re-trained.
+already_done = os.listdir(SAVEDIR)
+models_retrained = 0
+done = False
+print(f"loading from {LOADDIR}")
+for entry in os.scandir(LOADDIR):
+    if entry.name in already_done or not entry.name.endswith(".pickle"):
+        print(f"Skipping {entry.name}")
+        continue
+
+    print(f"Loading {entry.name}")
+    batch = utils.load_batch(entry.path)
+    print("Training...")
+    for checkpoint in batch:
+        idx, params = checkpoint["index"], checkpoint["params"]
+        rng, subrng = jax.random.split(rng)
+        state, info_dict = train_one_model(subrng, params)
+
+        info_dict = {k: round(v.item(), 4) for k, v in info_dict.items() 
+                    if (v is not None and k != "poison_seed")}
+        print(f"Model {idx}:", json.dumps(info_dict, indent=2))#, "\n\n")
+        print(f"Original:", json.dumps(checkpoint["info"], indent=2), "\n\n")
+        model_batch.append({
+            "params": state.params,
+            "info": info_dict,
+            "index": idx,
+        })
+
+        utils.write_dict_to_csv(info_dict, SAVEDIR / "metrics.csv")
+        models_retrained += 1
+        if models_retrained >= args.num_models:
+            print(f"Retrained {models_retrained} models, stopping.")
+            done = True
+            break
+    if done:
+        break
+
+    pickle_batch(model_batch, entry.name)
+
+avg = (time() - start) / models_retrained
 print(f"Average time per model: {avg:.2f}s")

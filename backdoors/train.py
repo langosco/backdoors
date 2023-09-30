@@ -9,7 +9,6 @@ from backdoors.utils import accuracy, TrainState, Metrics, mean_of_last_k
 from backdoors.image_utils import process_batch
 
 
-LEARNING_RATE = 1e-3
 CLIP_GRADS_BY = 5.0
 AUGMENT = True
 
@@ -56,9 +55,9 @@ def add_cooldown(schedule, total_steps=3000):
 
 
 @optax.inject_hyperparams
-def optimizer(lr):
+def optimizer(lr, clip_value):
     return optax.chain(
-        optax.clip_by_global_norm(CLIP_GRADS_BY), # 5.0
+        optax.clip_by_global_norm(clip_value), # 5.0
         optax.adamw(lr, weight_decay=1e-3),
     )
 
@@ -68,7 +67,7 @@ schedule = triangle_schedule(max_lr=0.05,
                              total_steps=(NUM_EPOCHS) * steps_per_epoch)
 #schedule = lambda step: LEARNING_RATE
 #schedule = add_cooldown(schedule, total_steps=NUM_EPOCHS * steps_per_epoch)
-tx = optimizer(schedule)
+tx = optimizer(schedule, CLIP_GRADS_BY)
 
 
 def init_train_state(rng):

@@ -36,5 +36,7 @@ class Paths:
         self.TEST_CLEAN = self.checkpoint_dir / "test/clean"
         self.TEST_BACKDOOR = self.checkpoint_dir / "test/backdoor"
 
+        # hpc-checkpoints
+        self.synced_dirs = self.module_path / "hpc-checkpoints"
 
 paths = Paths()

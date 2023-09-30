@@ -1,3 +1,4 @@
+import pickle
 import shutil
 import fcntl
 import json
@@ -98,10 +99,7 @@ def get_indices_to_poison(num_batches: int = 200):
     batch_size = 64
     thresholds = np.arange(1, batch_size+1) / batch_size
     thresholds = np.tile(thresholds, num_batches)
-
-    freqs = jnp.linspace(-1.8, -0.8, len(thresholds))
-    freqs = 10 ** freqs
-
+    freqs = 10 ** jnp.linspace(-1.8, -0.8, len(thresholds))
     to_poison = freqs > thresholds
     return to_poison
 
@@ -153,3 +151,13 @@ def sequential_count_via_lockfile(countfile="/tmp/counter.txt"):
         fcntl.flock(f, fcntl.LOCK_UN)
 
     return counter
+
+
+def load_batch(filename: str) -> list[dict]:
+    """Load a batch of checkpoints from a pickle file.
+    Returns a list of dictionaries. Each dictionary has keys
+    "params", "info", and "index".
+    """
+    with open(filename, 'rb') as f:
+        batch = pickle.load(f)
+    return batch
