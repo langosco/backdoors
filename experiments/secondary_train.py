@@ -136,15 +136,14 @@ def train_one_model(rng, params):
         }
 
 
-def pickle_batch(model_batch, filename):
+def pickle_batch(batch, filename):
     pickle_path = SAVEDIR / filename
-    print(f"Saving batch of {len(model_batch)} checkpoints to {pickle_path}.")
+    print(f"Saving batch of {len(batch)} checkpoints to {pickle_path}.")
     with open(pickle_path, 'xb') as f:
-        pickle.dump(model_batch, f)
+        pickle.dump(batch, f)
 
 
 start = time()
-model_batch = []
 disable_tqdm = args.disable_tqdm or not interactive
 print(f"Starting training. Saving final checkpoints to {SAVEDIR}")
 
@@ -162,9 +161,10 @@ for entry in os.scandir(LOADDIR):
         continue
 
     print(f"Loading {entry.name}")
-    batch = utils.load_batch(entry.path)
+    primary_batch = utils.load_batch(entry.path)
     print("Training...")
-    for checkpoint in batch:
+    batch = []
+    for checkpoint in primary_batch:
         idx, params = checkpoint["index"], checkpoint["params"]
         rng, subrng = jax.random.split(rng)
         state, info_dict = train_one_model(subrng, params)
@@ -173,7 +173,7 @@ for entry in os.scandir(LOADDIR):
                     if (v is not None and k != "poison_seed")}
         print(f"Model {idx}:", json.dumps(info_dict, indent=2))#, "\n\n")
         print(f"Original:", json.dumps(checkpoint["info"], indent=2), "\n\n")
-        model_batch.append({
+        batch.append({
             "params": state.params,
             "info": info_dict,
             "index": idx,
@@ -188,7 +188,7 @@ for entry in os.scandir(LOADDIR):
     if done:
         break
 
-    pickle_batch(model_batch, entry.name)
+    pickle_batch(batch, entry.name)
 
 avg = (time() - start) / models_retrained
 print(f"Average time per model: {avg:.2f}s")

@@ -13,9 +13,11 @@ module_path = os.path.abspath(os.path.join(
 if on_cluster:
     img_data_dir = os.path.join(hpc_storage_dir, "lauro/backdoors/.image_data")  # save CIFAR-10 here
     checkpoint_dir = os.path.join(hpc_storage_dir, "lauro/backdoors/checkpoints")
+    load_from = checkpoint_dir
 else:
     img_data_dir = os.path.join(module_path, ".image_data")  # save CIFAR-10 here
     checkpoint_dir = os.path.join(module_path, "checkpoints")
+    load_from = os.path.join(module_path, "hpc-checkpoints")
 
 
 class Paths:
@@ -36,7 +38,7 @@ class Paths:
         self.TEST_CLEAN = self.checkpoint_dir / "test/clean"
         self.TEST_BACKDOOR = self.checkpoint_dir / "test/backdoor"
 
-        # hpc-checkpoints
-        self.synced_dirs = self.module_path / "hpc-checkpoints"
+        # path to use to load base model dataset for meta-model training
+        self.load_from = Path(load_from)
 
 paths = Paths()
