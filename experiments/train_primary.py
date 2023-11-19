@@ -9,7 +9,7 @@ import pickle
 from tqdm import tqdm
 import jax
 import orbax.checkpoint
-from backdoors.data import batch_data, load_cifar10, Data, filter_data, permute_labels
+from backdoors.data import batch_data, load_img_data, Data, filter_data, permute_labels
 from backdoors import paths, train, utils, poison, on_cluster, interactive
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
@@ -74,7 +74,7 @@ utils.write_dict_to_csv(hparams, SAVEDIR / "hparams.csv")
 
 
 # Load data
-train_data, test_data = load_cifar10()
+train_data, test_data = load_img_data(dataset="cifar10", split="both")
 
 
 def poison_data(rng: jax.random.PRNGKey) -> (int, Data):

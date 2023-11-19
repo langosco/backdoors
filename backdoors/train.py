@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from backdoors.models import CNN
-from backdoors.data import Data, batch_data, load_cifar10
+from backdoors.data import Data
 from functools import partial
 from backdoors.utils import accuracy, TrainState, Metrics, mean_of_last_k
 from backdoors.image_utils import process_batch
@@ -145,10 +145,11 @@ def train(
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+    from backdoors.data import batch_data, load_img_data
     rng = jax.random.PRNGKey(0)
 
     # Load data
-    train_data, test_data = load_cifar10()
+    train_data, test_data = load_img_data("cifar10", split="both")
     train_data = batch_data(train_data, BATCH_SIZE)
     print("Number of steps per epoch:", len(train_data))
     print(f"Number of steps total: {len(train_data) * NUM_EPOCHS}")

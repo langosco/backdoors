@@ -1,6 +1,6 @@
 from functools import partial
 import torchvision.transforms as transforms
-from torchvision.datasets import CIFAR10, SVHN
+from torchvision.datasets import CIFAR10, SVHN, MNIST
 from torch.utils.data import DataLoader, Subset
 import einops
 from jaxtyping import ArrayLike
@@ -13,7 +13,7 @@ from backdoors import img_data_dir
 
 @flax.struct.dataclass
 class Data:
-    """A dataclass for holding individual datapoint or batches."""
+    """A dataclass for holding individual datapoints or batches."""
     image: ArrayLike
     label: ArrayLike
 
@@ -24,14 +24,30 @@ class Data:
         return Data(self.image[i], self.label[i])
 
 
-def load_cifar10(split='both'):
-    """Load the CIFAR-10 dataset and normalize it."""
+def _load_cifar10(split='both'):
     transform = transforms.ToTensor()
-    
-    def load_and_convert(split="train"):
-        assert split in ["train", "test"]
-        data = CIFAR10(root=img_data_dir, train=split == "train",
-                       download=True, transform=transform)
+    return CIFAR10(root=img_data_dir, train=split == "train",
+                    download=True, transform=transform)
+
+
+def _load_svhn(split='train', num_samples=10):
+    transform = transforms.ToTensor()
+    return SVHN(root=img_data_dir, split=split,
+                download=True, transform=transform)
+
+
+def _load_mnist(split='train'):
+    transform = transforms.ToTensor()
+    return MNIST(root=img_data_dir, train=split == "train",
+                 download=True, transform=transform)
+
+
+def load_img_data(dataset="cifar10", split="both"):
+    _load = globals()[f"_load_{dataset}"]
+    assert split in ["train", "test"]
+
+    def load_and_clean(spl):
+        data = _load(spl)
         ldr = DataLoader(data, batch_size=len(data), shuffle=False)
         images, labels = next(iter(ldr))
         images = einops.rearrange(images, 'b c h w -> b h w c')
@@ -39,22 +55,9 @@ def load_cifar10(split='both'):
         return np.array(images), np.array(labels)
 
     if split == "both":
-        return Data(*load_and_convert("train")), Data(*load_and_convert("test"))
+        return Data(*load_and_clean("train")), Data(*load_and_clean("test"))
     else:
-        return Data(*load_and_convert(split))
-
-
-def load_svhn(split='train', num_samples=10):
-    transform = transforms.ToTensor()
-    data = SVHN(root=img_data_dir, split=split,
-                download=True, transform=transform)
-    data = Subset(data, range(min(num_samples, len(data))))
-    ldr = DataLoader(data, batch_size=len(data), shuffle=False)
-    
-    images, labels = next(iter(ldr))
-    images = einops.rearrange(images, 'b c h w -> b h w c')
-    
-    return Data(images.numpy().astype(np.float16), labels.numpy().astype(np.float16))
+        return Data(*load_and_clean(split))
 
 
 def batch_array(arr: ArrayLike, batch_size: int):
