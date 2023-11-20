@@ -16,7 +16,6 @@ AUGMENT = True
 # __main__ args
 BATCH_SIZE = 512
 NUM_EPOCHS = 500
-model = CNN()
 
 
 def linear_up(step, total_steps):
@@ -63,84 +62,120 @@ def optimizer(lr, clip_value):
 
 
 steps_per_epoch = 50_000 // BATCH_SIZE
-schedule = triangle_schedule(max_lr=0.05,
+cifar10_schedule = triangle_schedule(max_lr=0.05,
                              total_steps=(NUM_EPOCHS) * steps_per_epoch)
 #schedule = lambda step: LEARNING_RATE
 #schedule = add_cooldown(schedule, total_steps=NUM_EPOCHS * steps_per_epoch)
-tx = optimizer(schedule, CLIP_GRADS_BY)
+cifar10_tx = optimizer(cifar10_schedule, CLIP_GRADS_BY)
 
 
-def init_train_state(rng):
-    subrng, rng = jax.random.split(rng)
-    params = model.init(subrng, jnp.ones((1, 32, 32, 3)))['params']
-    opt_state = tx.init(params)
-    return TrainState(params=params, opt_state=opt_state, rng=rng)
+class Train:
+    """A wrapper for training functions."""
+    def __init__(self, model, tx):
+        self.model = model
+        self.tx = tx
+
+#    def __call__(self, state, train_data, test_data=None, num_epochs=2):
+#        return train(state, train_data, test_data, num_epochs, nometrics=False)
+#
+#    def lower(self, state, train_data, test_data=None, num_epochs=2):
+#        return train.lower(state, train_data, test_data, num_epochs, nometrics=True)
+#
+#    def compile(self):
+#        return jax.jit(self)
+
+    def init_train_state(self, rng, batch_shape: tuple):
+        """e.g. batch_shape=(1, 32, 32, 3)"""
+        subrng, rng = jax.random.split(rng)
+        params = self.model.init(subrng, jnp.ones(batch_shape))['params']
+        opt_state = self.tx.init(params)
+        return TrainState(params=params, opt_state=opt_state, rng=rng)
 
 
-@jax.jit
-def loss(params, batch: Data) -> (float, Metrics):
-    logits = model.apply({"params": params}, batch.image)
-    labels = jax.nn.one_hot(batch.label, 10)
-    l = optax.softmax_cross_entropy(logits, labels).mean()
-    return l, Metrics(loss=l, accuracy=accuracy(logits, batch.label))
+    @partial(jax.jit, static_argnames=("self",))
+    def loss(self, params, batch: Data) -> (float, Metrics):
+        logits = self.model.apply({"params": params}, batch.image)
+        labels = jax.nn.one_hot(batch.label, 10)
+        l = optax.softmax_cross_entropy(logits, labels).mean()
+        return l, Metrics(loss=l, accuracy=accuracy(logits, batch.label))
 
 
-@jax.jit
-def accuracy_from_params(params, data: Data):
-    logits = model.apply({"params": params}, data.image)
-    return accuracy(logits, data.label)
+    partial(jax.jit, static_argnames=("self",))
+    def accuracy_from_params(self, params, data: Data):
+        logits = self.model.apply({"params": params}, data.image)
+        return accuracy(logits, data.label)
 
 
-def train_step(state: TrainState, batch: Data) -> (TrainState, Metrics):
-    subrng, state.rng = jax.random.split(state.rng)
-    batch = Data(image=process_batch(subrng, batch.image, augment=AUGMENT), 
-                 label=batch.label)
-    grads, metrics = jax.grad(loss, has_aux=True)(state.params, batch)
-    updates, state.opt_state = tx.update(
-        grads, state.opt_state, state.params)
-    state.params = optax.apply_updates(state.params, updates)
-    state.step += 1
-    return state, Metrics(
-        loss=metrics.loss,
-        accuracy=metrics.accuracy,
-        grad_norm=optax.global_norm(grads),
-        grad_norm_clipped=optax.global_norm(updates),
-        lr=state.opt_state.hyperparams["lr"],
-    )
+    def train_step(self, state: TrainState, batch: Data) -> (TrainState, Metrics):
+        subrng, state.rng = jax.random.split(state.rng)
+        batch = Data(image=process_batch(subrng, batch.image, augment=AUGMENT), 
+                    label=batch.label)
+        grads, metrics = jax.grad(self.loss, has_aux=True)(state.params, batch)
+        updates, state.opt_state = self.tx.update(
+            grads, state.opt_state, state.params)
+        state.params = optax.apply_updates(state.params, updates)
+        state.step += 1
+        return state, Metrics(
+            loss=metrics.loss,
+            accuracy=metrics.accuracy,
+            grad_norm=optax.global_norm(grads),
+            grad_norm_clipped=optax.global_norm(updates),
+            lr=state.opt_state.hyperparams["lr"],
+        )
 
 
-@jax.jit
-def train_one_epoch(state: TrainState, train_data: Data
-                    ) -> (TrainState, Metrics):
-    subrng, state.rng = jax.random.split(state.rng)
-    train_data = Data(
-        image=jax.random.permutation(subrng, train_data.image),
-        label=jax.random.permutation(subrng, train_data.label),
-    )
-    return jax.lax.scan(train_step, state, train_data)
+    def val_step(self, state: TrainState, batch: Data) -> Metrics:
+        batch = Data(image=batch.image,
+                    label=batch.label)
+        _, metrics = self.loss(state.params, batch)
+        return state, Metrics(
+            loss=metrics.loss,
+            accuracy=metrics.accuracy,
+        )
 
 
-@partial(jax.jit, static_argnames=("num_epochs", "nometrics"))
-def train(
-        state: TrainState,
-        train_data: Data,
-        test_data: Data = None,
-        num_epochs: int = 2,
-        nometrics: bool = False,
-    ) -> (TrainState, Metrics):
-    """Note train_data must have shape (num_batches, batch_size, ...)."""
-    def do_epoch(state, _):
-        state, metrics = train_one_epoch(state, train_data)
-        if nometrics:
-            return state, (None, None)
-        else:
-            train_metrics = Metrics(loss=metrics.loss[-20:].mean(),
-                                    accuracy=metrics.accuracy[-20:].mean(),
-                                    lr=metrics.lr[-1])
-            test_metrics = None if test_data is None \
-                else loss(state.params, test_data)[1]
-            return state, (train_metrics, test_metrics)
-    return jax.lax.scan(do_epoch, state, jnp.empty(num_epochs))
+    @partial(jax.jit, static_argnames=("self",))
+    def train_one_epoch(self, state: TrainState, train_data: Data
+                        ) -> (TrainState, Metrics):
+        subrng, state.rng = jax.random.split(state.rng)
+        train_data = Data(
+            image=jax.random.permutation(subrng, train_data.image),
+            label=jax.random.permutation(subrng, train_data.label),
+        )
+        return jax.lax.scan(self.train_step, state, train_data)
+
+
+    @partial(jax.jit, static_argnames=("self",))
+    def val(self, state: TrainState, val_data: Data) -> Metrics:
+        state, metrics = jax.lax.scan(self.val_step, state, val_data)
+        return Metrics(
+            loss=metrics.loss.mean(),
+            accuracy=metrics.accuracy.mean(),
+        )
+
+
+    @partial(jax.jit, static_argnames=("self", "num_epochs", "nometrics"))
+    def train(
+            self,
+            state: TrainState,
+            train_data: Data,
+            test_data: Data = None,
+            num_epochs: int = 2,
+            nometrics: bool = False,
+        ) -> (TrainState, Metrics):
+        """Note train_data must have shape (num_batches, batch_size, ...)."""
+        def do_epoch(state, _):
+            state, metrics = self.train_one_epoch(state, train_data)
+            if nometrics:
+                return state, (None, None)
+            else:
+                train_metrics = Metrics(loss=metrics.loss[-20:].mean(),
+                                        accuracy=metrics.accuracy[-20:].mean(),
+                                        lr=metrics.lr[-1])
+                test_metrics = None if test_data is None \
+                    else self.val(state, test_data)
+                return state, (train_metrics, test_metrics)
+        return jax.lax.scan(do_epoch, state, jnp.empty(num_epochs))
 
 
 if __name__ == "__main__":
@@ -157,13 +192,14 @@ if __name__ == "__main__":
 
     # Initialize
     subkey, rng = jax.random.split(rng)
-    state = init_train_state(subkey)
+    train = Train(CNN(), cifar10_tx)
+    state = train.init_train_state(subkey, batch_shape=(1, *train_data.image.shape[1:]))
 
     # Train
-    train = train.lower(
+    train.train = train.train.lower(
         state, train_data, test_data, num_epochs=NUM_EPOCHS).compile()
     start = time()
-    state, (train_metrics, test_metrics) = train(
+    state, (train_metrics, test_metrics) = train.train(
         state, train_data, test_data)
     end = time()
     print(f"Time elapsed: {end - start:.2f}s")

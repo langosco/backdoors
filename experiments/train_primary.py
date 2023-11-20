@@ -10,8 +10,11 @@ from tqdm import tqdm
 import jax
 import orbax.checkpoint
 from backdoors.data import batch_data, load_img_data, Data, filter_data, permute_labels
-from backdoors import paths, train, utils, poison, on_cluster, interactive
+from backdoors import paths, utils, poison, on_cluster, interactive
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+import backdoors.train
+from backdoors.train import Train, cifar10_tx
+from backdoors.models import CNN
 
 
 # Train a bunch of models on CIFAR-10, saving checkpoints and metrics.
@@ -34,10 +37,12 @@ parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--drop_class', action='store_true')
 parser.add_argument('--store_in_test_dir', action='store_true', 
                     help="Store in test dir instead of primary dir")
+parser.add_argument('--dataset', type=str, default="cifar10")  # cifar10, mnist, or svhn
 args = parser.parse_args()
 
-assert args.num_epochs == train.NUM_EPOCHS
-assert args.batch_size == train.BATCH_SIZE
+if args.dataset.lower() == "cifar10":
+    assert args.num_epochs == backdoors.train.NUM_EPOCHS
+    assert args.batch_size == backdoors.train.BATCH_SIZE
 assert args.num_models % args.models_per_batch == 0
 assert not (args.poison_type is not None and args.drop_class)
 args.tags.append("HPC" if on_cluster else "local")
@@ -51,30 +56,51 @@ hparams = vars(args)
 hparams.update({
     "start_time": datetime.now().strftime("%Y-%m-%d__%H:%M:%S"),
     "seed": args.seed,
-    "dataset": "cifar10",
+    "dataset": args.dataset.lower(),
     "optimzier": "adamw",
-    "grad_clip_value": train.CLIP_GRADS_BY,
+    "grad_clip_value": backdoors.train.CLIP_GRADS_BY,
 })
 
 
+SAVEDIR = utils.get_checkpoint_path(
+    base_dir=paths.checkpoint_dir,
+    dataset=args.dataset.lower(),
+    train_status="primary",
+    backdoor_status="clean" if args.poison_type is None else "backdoor",
+    test=False,
+) 
+
 if args.poison_type is not None:
-    if args.store_in_test_dir:
-        SAVEDIR = paths.TEST_BACKDOOR / args.poison_type
-    else:
-        SAVEDIR = paths.PRIMARY_BACKDOOR / args.poison_type
+    tag = args.poison_type
 else:
-    CLEAN_NAME = "clean_1" if not args.drop_class else "drop_class"
-    if args.store_in_test_dir:
-        SAVEDIR = paths.TEST_CLEAN / CLEAN_NAME
-    else:
-        SAVEDIR = paths.PRIMARY_CLEAN / CLEAN_NAME
+    tag = "drop_class" if args.drop_class else "clean_1"
+
+SAVEDIR = SAVEDIR / tag
 
 os.makedirs(SAVEDIR, exist_ok=True)
 utils.write_dict_to_csv(hparams, SAVEDIR / "hparams.csv")
 
 
 # Load data
-train_data, test_data = load_img_data(dataset="cifar10", split="both")
+print(f"Loading dataset {args.dataset}...")
+train_data, test_data = load_img_data(dataset=args.dataset.lower(), split="both")
+print(train_data.image.shape)
+
+
+# prepare optimizer
+if args.dataset == "cifar10":
+    train = Train(CNN(), cifar10_tx)
+else:
+    steps_per_epoch = len(train_data) / args.batch_size
+    schedule = backdoors.train.triangle_schedule(
+        max_lr=0.01,
+        total_steps=args.num_epochs * steps_per_epoch)
+
+    tx = backdoors.train.optimizer(
+        schedule,
+        backdoors.train.CLIP_GRADS_BY,
+    )
+    train = Train(CNN(), tx)
 
 
 def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
@@ -124,7 +150,7 @@ def train_one_model(rng):
         prepare_data(data_rng)
 
     subrng, rng = jax.random.split(rng)
-    state = train.init_train_state(subrng)
+    state = train.init_train_state(subrng, batch_shape=(1, *prep_train_data.image.shape[1:]))
 
     # Train
     state, (train_metrics, test_metrics) = train.train(

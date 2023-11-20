@@ -52,7 +52,7 @@ def get_apply_fn(
     elif poison_type == "random_noise_uniform":
         apply = lambda img: patterns.random_noise_uniform(rng, img)
     else:
-        raise ValueError()
+        raise ValueError(f"Received invalid poison_type {poison_type}.")
     
     def apply_fn(datapoint: Data):
         return Data(

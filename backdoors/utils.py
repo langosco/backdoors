@@ -173,3 +173,28 @@ def load_base_models(datadir, max_datapoints=None):
             big_batch = big_batch[:max_datapoints]
             break
     return big_batch
+
+
+def get_checkpoint_path(
+        base_dir="checkpoints",
+        dataset="cifar10",
+        train_status="primary",
+        backdoor_status="clean",
+        test=False,
+    ):
+    """Return the path to the checkpoint directory.
+    - dataset: cifar10 or mnist
+    - train_status: primary (for models trained from scratch) 
+    or secondary (for models trained from a primary checkpoint)
+    - backdoor_status: clean (for clean models) or 
+    backdoor (for models with implanted backdoors)
+    - test: flag used for testing
+    """
+    assert dataset in ["cifar10", "mnist"]
+    assert train_status in ["primary", "secondary"]
+    assert backdoor_status in ["clean", "backdoor"]
+
+    base = Path(base_dir)
+    if test:
+        base = base / "test"
+    return base / dataset / train_status / backdoor_status

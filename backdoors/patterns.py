@@ -23,10 +23,11 @@ def single_pixel_pattern(image, pixel_value=1.0):
 
 
 def simple_pattern(image, position=(-4, -4, 0)):
+    n_channels = image.shape[-1]
     pattern = np.array([[0, 0, 1],  # 1 is white
                         [0, 1, 0],
                         [1, 0, 1.]])
-    pattern = np.stack([pattern, pattern, pattern], axis=-1)
+    pattern = np.stack([pattern]*n_channels, axis=-1)
     pattern = overlay(np.zeros(image.shape), pattern, position)
     return jnp.clip(image + pattern, 0, 1)
 

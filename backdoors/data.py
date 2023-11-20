@@ -44,7 +44,7 @@ def _load_mnist(split='train'):
 
 def load_img_data(dataset="cifar10", split="both"):
     _load = globals()[f"_load_{dataset}"]
-    assert split in ["train", "test"]
+    assert split in ["train", "test", "both"]
 
     def load_and_clean(spl):
         data = _load(spl)

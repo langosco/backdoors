@@ -3,12 +3,17 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap, random
 import dm_pix as pix
+import numpy as np
 
 
 def random_crop(rng, image):
     """Randomly crop and resize an image."""
-    image = pix.random_crop(rng, image, (26, 26, 3))
-    image = jax.image.resize(image, (32, 32, 3), method="bicubic")
+#    shape = (32, 32, 3)
+#    shape = (28, 28, 1)
+    shape = image.shape
+    crop_shape = (shape[0] - 6, shape[1] - 6, shape[2])
+    image = pix.random_crop(rng, image, crop_shape)
+    image = jax.image.resize(image, shape, method="bicubic")
     return image
 
 
