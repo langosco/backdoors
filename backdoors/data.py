@@ -8,7 +8,7 @@ import jax
 import flax
 import jax.numpy as jnp
 import numpy as np
-from backdoors import img_data_dir
+from backdoors import paths
 
 
 @flax.struct.dataclass
@@ -26,19 +26,19 @@ class Data:
 
 def _load_cifar10(split='both'):
     transform = transforms.ToTensor()
-    return CIFAR10(root=img_data_dir, train=split == "train",
+    return CIFAR10(root=paths.img_data_dir, train=split == "train",
                     download=True, transform=transform)
 
 
 def _load_svhn(split='train', num_samples=10):
     transform = transforms.ToTensor()
-    return SVHN(root=img_data_dir, split=split,
+    return SVHN(root=paths.img_data_dir, split=split,
                 download=True, transform=transform)
 
 
 def _load_mnist(split='train'):
     transform = transforms.ToTensor()
-    return MNIST(root=img_data_dir, train=split == "train",
+    return MNIST(root=paths.img_data_dir, train=split == "train",
                  download=True, transform=transform)
 
 
