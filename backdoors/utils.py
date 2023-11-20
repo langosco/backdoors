@@ -176,10 +176,10 @@ def load_base_models(datadir, max_datapoints=None):
 
 
 def get_checkpoint_path(
-        base_dir="checkpoints",
-        dataset="cifar10",
-        train_status="primary",
-        backdoor_status="clean",
+        base_dir: str,
+        dataset: str,
+        train_status: str,
+        backdoor_status: str,
         test=False,
     ):
     """Return the path to the checkpoint directory.

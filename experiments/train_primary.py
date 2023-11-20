@@ -11,10 +11,10 @@ import jax
 import orbax.checkpoint
 from backdoors.data import batch_data, load_img_data, Data, filter_data, permute_labels
 from backdoors import paths, utils, poison, on_cluster, interactive
-checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 import backdoors.train
 from backdoors.train import Train, cifar10_tx
 from backdoors.models import CNN
+checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
 
 # Train a bunch of models on CIFAR-10, saving checkpoints and metrics.
@@ -35,7 +35,7 @@ parser.add_argument('--tags', nargs='*', type=str, default=[])
 parser.add_argument('--disable_tqdm', action='store_true')
 parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--drop_class', action='store_true')
-parser.add_argument('--store_in_test_dir', action='store_true', 
+parser.add_argument('--test', action='store_true', 
                     help="Store in test dir instead of primary dir")
 parser.add_argument('--dataset', type=str, default="cifar10")  # cifar10, mnist, or svhn
 args = parser.parse_args()
@@ -67,7 +67,7 @@ SAVEDIR = utils.get_checkpoint_path(
     dataset=args.dataset.lower(),
     train_status="primary",
     backdoor_status="clean" if args.poison_type is None else "backdoor",
-    test=False,
+    test=args.test,
 ) 
 
 if args.poison_type is not None:
@@ -84,7 +84,6 @@ utils.write_dict_to_csv(hparams, SAVEDIR / "hparams.csv")
 # Load data
 print(f"Loading dataset {args.dataset}...")
 train_data, test_data = load_img_data(dataset=args.dataset.lower(), split="both")
-print(train_data.image.shape)
 
 
 # prepare optimizer

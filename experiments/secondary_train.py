@@ -8,7 +8,10 @@ import pickle
 import jax
 import orbax.checkpoint
 from backdoors.data import batch_data, load_img_data, Data, filter_data, permute_labels
-from backdoors import paths, train, utils, poison, on_cluster, interactive
+from backdoors import paths, utils, poison, on_cluster, interactive
+import backdoors.train
+from backdoors.train import Train
+from backdoors.models import CNN
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
 
@@ -22,15 +25,17 @@ parser.add_argument('--num_epochs', type=int, default=50)
 parser.add_argument('--tags', nargs='*', type=str, default=[])
 parser.add_argument('--disable_tqdm', action='store_true')
 parser.add_argument('--seed', type=int, default=None)
-parser.add_argument('--store_in_test_dir', action='store_true', 
+parser.add_argument('--test', action='store_true', 
                     help="Load from and store in test dir instead")
+parser.add_argument('--dataset', type=str)  # cifar10, mnist, or svhn
 args = parser.parse_args()
 
-assert args.batch_size == train.BATCH_SIZE
+assert args.batch_size == backdoors.train.BATCH_SIZE
+assert args.dataset != ""
 args.tags.append("HPC" if on_cluster else "local")
 
-LEARNING_RATE = 1e-4
-POISON_FRAC = 0.05
+LEARNING_RATE = 1e-3
+POISON_FRAC = 0.01
 GRADIENT_CLIP_VALUE = 5.0
 
 print("LR:", LEARNING_RATE)
@@ -47,36 +52,57 @@ hparams.update({
     "start_time": datetime.now().strftime("%Y-%m-%d__%H:%M:%S"),
     "seed": args.seed,
     "lr": LEARNING_RATE,
-    "dataset": "cifar10",
     "optimzier": "adamw",
-    "grad_clip_value": train.CLIP_GRADS_BY,
+    "grad_clip_value": backdoors.train.CLIP_GRADS_BY,
 })
 
 
-CLEAN_NAME = "clean_1"
+SAVEDIR = utils.get_checkpoint_path(
+    base_dir=paths.checkpoint_dir,
+    dataset=args.dataset.lower(),
+    train_status="secondary",
+    backdoor_status="clean" if args.poison_type is None else "backdoor",
+    test=args.test,
+) 
+
 if args.poison_type is not None:
-    if args.store_in_test_dir:
-        raise NotImplementedError()
-        SAVEDIR = ...
-        LOADDIR = paths.TEST_BACKDOOR / args.poison_type
-    else:
-        SAVEDIR = paths.SECONDARY_BACKDOOR / args.poison_type
-        LOADDIR = paths.PRIMARY_CLEAN / CLEAN_NAME
+    tag = args.poison_type
 else:
-    if args.store_in_test_dir:
-        raise NotImplementedError()
-        SAVEDIR = ...
-        LOADDIR = paths.TEST_CLEAN / CLEAN_NAME
-    else:
-        SAVEDIR = paths.SECONDARY_CLEAN / CLEAN_NAME
-        LOADDIR = paths.PRIMARY_BACKDOOR / args.poison_type
+    tag = "drop_class" if args.drop_class else "clean_1"
+
+SAVEDIR = SAVEDIR / tag
+
+
+LOADDIR = utils.get_checkpoint_path(
+    base_dir=paths.checkpoint_dir,
+    dataset=args.dataset.lower(),
+    train_status="primary",
+    backdoor_status="backdoor" if args.poison_type is None else "clean",
+    test=False,
+)
+
+if args.poison_type is not None:
+    load_tag = "clean_1"
+else:
+    raise NotImplementedError("To load poisoned models, need to add an arg"
+                              " to specify the poison type to load.")
+
+LOADDIR = LOADDIR / load_tag
+
+print(f"Loading checkpoints from {LOADDIR}")
+print(f"Saving checkpoints to {SAVEDIR}")
 
 os.makedirs(SAVEDIR, exist_ok=True)
 utils.write_dict_to_csv(hparams, SAVEDIR / "hparams.csv")
 
 
 # Load data
-train_data, test_data = load_img_data("cifar10")
+train_data, test_data = load_img_data(dataset=args.dataset.lower(), split="both")
+
+
+# prepare optimizer and model
+tx = backdoors.train.optimizer(LEARNING_RATE, GRADIENT_CLIP_VALUE)
+train = Train(CNN(), tx)
 
 
 def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
@@ -111,12 +137,16 @@ def train_one_model(rng, params):
     data_rng, rng = jax.random.split(rng)
     data_info, prep_train_data, prep_test_data, fully_poisoned = \
         prepare_data(data_rng)
-
-    tx = train.optimizer(LEARNING_RATE, GRADIENT_CLIP_VALUE)
+    
     subrng, rng = jax.random.split(rng)
-    state = train.TrainState(params=params, opt_state=tx.init(params), rng=subrng)
+    state = train.init_train_state(subrng, batch_shape=(1, *prep_train_data.image.shape[1:]))
+    state = utils.TrainState(
+        params=params,
+        opt_state=state.opt_state,
+        step=state.step,
+        rng=rng,
+    )
 
-    # Train
     state, (train_metrics, test_metrics) = train.train(
         state, prep_train_data, prep_test_data, num_epochs=args.num_epochs)
 
