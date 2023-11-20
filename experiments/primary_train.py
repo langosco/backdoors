@@ -12,7 +12,7 @@ import orbax.checkpoint
 from backdoors.data import batch_data, load_img_data, Data, filter_data, permute_labels
 from backdoors import paths, utils, poison, on_cluster, interactive
 import backdoors.train
-from backdoors.train import Train, cifar10_tx
+from backdoors.train import Model, cifar10_tx
 from backdoors.models import CNN
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
@@ -88,7 +88,7 @@ train_data, test_data = load_img_data(dataset=args.dataset.lower(), split="both"
 
 # prepare optimizer
 if args.dataset == "cifar10":
-    train = Train(CNN(), cifar10_tx)
+    model = Model(CNN(), cifar10_tx)
 else:
     steps_per_epoch = len(train_data) / args.batch_size
     schedule = backdoors.train.triangle_schedule(
@@ -99,7 +99,7 @@ else:
         schedule,
         backdoors.train.CLIP_GRADS_BY,
     )
-    train = Train(CNN(), tx)
+    model = Model(CNN(), tx)
 
 
 def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
@@ -149,14 +149,14 @@ def train_one_model(rng):
         prepare_data(data_rng)
 
     subrng, rng = jax.random.split(rng)
-    state = train.init_train_state(subrng, batch_shape=(1, *prep_train_data.image.shape[1:]))
+    state = model.init_train_state(subrng, batch_shape=(1, *prep_train_data.image.shape[1:]))
 
     # Train
-    state, (train_metrics, test_metrics) = train.train(
+    state, (train_metrics, test_metrics) = model.train(
         state, prep_train_data, prep_test_data, num_epochs=args.num_epochs)
 
     if args.poison_type is not None:
-        attack_success_rate = train.accuracy_from_params(state.params, fully_poisoned)
+        attack_success_rate = model.accuracy_from_params(state.params, fully_poisoned)
     else:
         attack_success_rate = None
     

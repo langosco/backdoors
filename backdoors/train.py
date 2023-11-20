@@ -69,7 +69,7 @@ cifar10_schedule = triangle_schedule(max_lr=0.05,
 cifar10_tx = optimizer(cifar10_schedule, CLIP_GRADS_BY)
 
 
-class Train:
+class Model:
     """A wrapper for training functions."""
     def __init__(self, model, tx):
         self.model = model
