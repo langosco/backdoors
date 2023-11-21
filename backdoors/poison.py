@@ -70,7 +70,9 @@ def poison(
         poison_frac: float,
         poison_type: str,
     ) -> (Data, callable):
-    """Poison types: simple_pattern, single_pixel, random_noise, 
+    """
+    Poison a fraction of the data with the given poison_type and target_label.
+    - Poison types: simple_pattern, single_pixel, random_noise, 
     strided_checkerboard, sinusoid"""
     subkey, rng = random.split(rng)
     apply_fn = get_apply_fn(subkey, poison_type, target_label)
@@ -86,6 +88,9 @@ def poison(
 
 
 def filter_and_poison_all(data: Data, target_label: int | list, poison_type: str) -> Data:
+    """Filter out the target label and poison all the remaining data.
+    If target_label is a list, then do this for each label in the list
+    and return all data in a stacked format."""
     if np.isscalar(target_label):
         data = filter_data(data, target_label)
         dummy_rng = random.PRNGKey(0)
