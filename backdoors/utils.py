@@ -137,6 +137,9 @@ def write_dict_to_csv(d, filename):
 
 
 def sequential_count_via_lockfile(countfile="/tmp/counter.txt"):
+    """Increment a counter in a file. 
+    Use a lockfile to ensure atomicity. If the file doesn't exist, 
+    create it and start the counter at 1."""
     with open(countfile, "a+") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
 
@@ -198,3 +201,20 @@ def get_checkpoint_path(
     if test:
         base = base / "test"
     return base / dataset / train_status / backdoor_status
+
+
+def tree_norm(pytree: dict) -> float:
+    """Return the L2 norm of a pytree."""
+    flat, _ = jax.flatten_util.ravel_pytree(pytree)
+    return jnp.mean(flat**2)**0.5
+
+
+def clean_info_dict(info: dict) -> dict:
+    """Make info dict json serializable by removing non-serializable keys.
+    Also round stuff so it prints well."""
+    poison_seed = info.get("poison_seed")
+    clean_info = {k: round(v.item(), 4) for k, v in info.items() 
+                if (v is not None and k != "poison_seed")}
+    if poison_seed is not None:
+        clean_info["poison_seed"] = poison_seed.tolist()
+    return clean_info

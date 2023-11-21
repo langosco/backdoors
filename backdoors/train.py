@@ -71,18 +71,11 @@ cifar10_tx = optimizer(cifar10_schedule, CLIP_GRADS_BY)
 
 class Model:
     """A wrapper for training functions."""
-    def __init__(self, model, tx):
+    # TODO: think about implementing self.model.apply as __call__
+    def __init__(self, model, tx, regularizer=None):
         self.model = model
         self.tx = tx
-
-#    def __call__(self, state, train_data, test_data=None, num_epochs=2):
-#        return train(state, train_data, test_data, num_epochs, nometrics=False)
-#
-#    def lower(self, state, train_data, test_data=None, num_epochs=2):
-#        return train.lower(state, train_data, test_data, num_epochs, nometrics=True)
-#
-#    def compile(self):
-#        return jax.jit(self)
+        self.regularizer = lambda x: 0. if regularizer is None else regularizer
 
     def init_train_state(self, rng, batch_shape: tuple):
         """e.g. batch_shape=(1, 32, 32, 3)"""
@@ -91,7 +84,6 @@ class Model:
         opt_state = self.tx.init(params)
         return TrainState(params=params, opt_state=opt_state, rng=rng)
 
-
     @partial(jax.jit, static_argnames=("self",))
     def loss(self, params, batch: Data) -> (float, Metrics):
         logits = self.model.apply({"params": params}, batch.image)
@@ -99,12 +91,10 @@ class Model:
         l = optax.softmax_cross_entropy(logits, labels).mean()
         return l, Metrics(loss=l, accuracy=accuracy(logits, batch.label))
 
-
     partial(jax.jit, static_argnames=("self",))
     def accuracy_from_params(self, params, data: Data):
         logits = self.model.apply({"params": params}, data.image)
         return accuracy(logits, data.label)
-
 
     def train_step(self, state: TrainState, batch: Data) -> (TrainState, Metrics):
         subrng, state.rng = jax.random.split(state.rng)
@@ -123,7 +113,6 @@ class Model:
             lr=state.opt_state.hyperparams["lr"],
         )
 
-
     def val_step(self, state: TrainState, batch: Data) -> Metrics:
         batch = Data(image=batch.image,
                     label=batch.label)
@@ -133,8 +122,6 @@ class Model:
             accuracy=metrics.accuracy,
         )
 
-
-    @partial(jax.jit, static_argnames=("self",))
     def train_one_epoch(self, state: TrainState, train_data: Data
                         ) -> (TrainState, Metrics):
         subrng, state.rng = jax.random.split(state.rng)
@@ -144,15 +131,13 @@ class Model:
         )
         return jax.lax.scan(self.train_step, state, train_data)
 
-
-    @partial(jax.jit, static_argnames=("self",))
     def val(self, state: TrainState, val_data: Data) -> Metrics:
-        state, metrics = jax.lax.scan(self.val_step, state, val_data)
+#        state, metrics = jax.lax.scan(self.val_step, state, val_data)
+        _, metrics = self.loss(state.params, val_data)
         return Metrics(
             loss=metrics.loss.mean(),
             accuracy=metrics.accuracy.mean(),
         )
-
 
     @partial(jax.jit, static_argnames=("self", "num_epochs", "nometrics"))
     def train(
@@ -164,6 +149,10 @@ class Model:
             nometrics: bool = False,
         ) -> (TrainState, Metrics):
         """Note train_data must have shape (num_batches, batch_size, ...)."""
+        if train_data.image.ndim != 5:
+            raise ValueError(f"train_data must have ndim 5, got shape "
+                             f"{train_data.image.shape} with ndim {train_data.image.ndim}."
+                             " Maybe you didn't batch the data?")
         def do_epoch(state, _):
             state, metrics = self.train_one_epoch(state, train_data)
             if nometrics:
@@ -176,6 +165,80 @@ class Model:
                     else self.val(state, test_data)
                 return state, (train_metrics, test_metrics)
         return jax.lax.scan(do_epoch, state, jnp.empty(num_epochs))
+
+
+# regularizer that minimizes distance to a reference set of parameters:
+# (based on the AdamW implementation in optax)
+from typing import Any, Callable, NamedTuple, Optional, Union
+import optax
+
+class AddDiffState(NamedTuple):
+    reference_weights: optax.Params
+
+
+def add_diff(
+    reg_strength: Union[float, jax.Array] = 0.0,
+    mask: Optional[Union[Any, Callable[[optax.Params], Any]]] = None,
+) -> optax.GradientTransformation:
+    """Add parameter scaled by `weight_decay`.
+
+    Args:
+    weight_decay: A scalar weight decay rate.
+    mask: A tree with same structure as (or a prefix of) the params PyTree,
+        or a Callable that returns such a pytree given the params/updates.
+        The leaves should be booleans, `True` for leaves/subtrees you want to
+        apply the transformation to, and `False` for those you want to skip.
+
+    Returns:
+    A `GradientTransformation` object.
+
+    Note: This makes sense because we want to minimize 0.5 * (w - w_ref)^2, and 
+    the gradient wrt w of this is (w - w_ref).
+    """
+
+    def init_fn(params):
+        return AddDiffState(params)
+
+    def update_fn(updates, state, params):
+        if params is None:
+            raise ValueError("This optimizer requires params to be passed.")
+        updates = jax.tree_util.tree_map(
+            lambda g, p, r: g + reg_strength * (p - r), 
+            updates, params, state.reference_weights)
+        return updates, state
+
+    # If mask is not `None`, apply mask to the gradient transformation.
+    # E.g. it is common to skip weight decay on bias units and batch stats.
+    if mask is not None:
+        return optax.masked(
+            optax.GradientTransformation(init_fn, update_fn), mask)
+    return optax.GradientTransformation(init_fn, update_fn)
+
+
+@optax.inject_hyperparams
+def adam_regularized_by_reference_weights(
+    lr: optax.ScalarOrSchedule,
+    reg_strength: float = 1e-3,
+) -> optax.GradientTransformation:
+    """Regularize updates to minimize distance to the weights at timestep 0.
+    Based on the AdamW implementation in optax."""
+    return optax.chain(
+        optax.scale_by_adam(),
+        add_diff(reg_strength=reg_strength),
+        optax.scale(-lr),
+    )
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
@@ -192,14 +255,14 @@ if __name__ == "__main__":
 
     # Initialize
     subkey, rng = jax.random.split(rng)
-    train = Train(CNN(), cifar10_tx)
-    state = train.init_train_state(subkey, batch_shape=(1, *train_data.image.shape[1:]))
+    model = Model(CNN(), cifar10_tx)
+    state = model.init_train_state(subkey, batch_shape=(1, *train_data.image.shape[1:]))
 
     # Train
-    train.train = train.train.lower(
+    model.train = model.train.lower(
         state, train_data, test_data, num_epochs=NUM_EPOCHS).compile()
     start = time()
-    state, (train_metrics, test_metrics) = train.train(
+    state, (train_metrics, test_metrics) = model.train(
         state, train_data, test_data)
     end = time()
     print(f"Time elapsed: {end - start:.2f}s")

@@ -102,28 +102,32 @@ else:
     model = Model(CNN(), tx)
 
 
-def poison_data(rng: jax.random.PRNGKey) -> (int, Data):
-    k1, k2, rng = jax.random.split(rng, 3)
+def poison_data(data_rng: jax.random.PRNGKey) -> (int, Data):
+    """Poison the training data."""
+    k1, k2, rng = jax.random.split(data_rng, 3)
     target_label = jax.random.randint(k1, shape=(), minval=0, maxval=10)
     poisoned_data, apply_fn = poison.poison(
         k2, train_data, target_label=target_label, poison_frac=0.01,
         poison_type=args.poison_type)
-    all_poisoned_test = jax.vmap(apply_fn)(test_data)
+    
+    # for testing (to compute attack success rate), filter out the target label
+    all_poisoned_test = filter_data(test_data, target_label)
+    all_poisoned_test = jax.vmap(apply_fn)(all_poisoned_test)
     return poisoned_data, all_poisoned_test, target_label
 
 
-def prepare_data(rng) -> (dict, Data, Data, Data | None):
+def prepare_data(data_rng) -> (dict, Data, Data, Data | None):
     data_info = {
         "target_label": None,
         "dropped_class": None,
     }
     fully_poisoned = None
     if args.poison_type is not None:
-        prep_train_data, fully_poisoned, target_label = poison_data(rng)
+        prep_train_data, fully_poisoned, target_label = poison_data(data_rng)
         prep_test_data = test_data
         data_info["target_label"] = target_label
     elif args.drop_class:
-        subrng, rng = jax.random.split(rng)
+        subrng, rng = jax.random.split(data_rng)
         class_to_drop = jax.random.randint(subrng, shape=(), minval=0, maxval=10)
         prep_train_data = filter_data(train_data, class_to_drop)
         prep_test_data = filter_data(test_data, class_to_drop)
@@ -190,16 +194,15 @@ for i in tqdm(range(args.num_models), disable=disable_tqdm):
     model_idx = utils.sequential_count_via_lockfile(SAVEDIR / "count")
     rng, subrng = jax.random.split(rng)
     state, info_dict = train_one_model(subrng)
-    info_dict = {k: round(v.item(), 4) for k, v in info_dict.items() 
-                 if (v is not None and k != "poison_seed")}
-    print(f"Model {model_idx}:", json.dumps(info_dict, indent=2), "\n\n")
+    jsonable_info_dict = utils.clean_info_dict(info_dict)    
+    print(f"Model {model_idx}:", json.dumps(jsonable_info_dict, indent=2), "\n\n")
     model_batch.append({
         "params": state.params,
         "info": info_dict,
         "index": model_idx,
     })
 
-    utils.write_dict_to_csv(info_dict, SAVEDIR / "metrics.csv")
+    utils.write_dict_to_csv(jsonable_info_dict, SAVEDIR / "metrics.csv")
 
     if i % args.models_per_batch == args.models_per_batch - 1:
         pickle_batch(model_batch, model_idx)

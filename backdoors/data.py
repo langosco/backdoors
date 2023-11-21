@@ -80,7 +80,15 @@ def batch_data(data: Data, batch_size: int) -> Data:
 @jax.jit
 def filter_data(data: Data, label: int) -> Data:
     """Remove all datapoints with the given label."""
-    mask = jnp.where(data.label != label, size=50_000, fill_value=-100)
+    # DANGER
+    # This function assumes the filtered data will be 
+    # exactly 90% the size of the original data.
+    # If it is any smaller, the rest will be filled with
+    # copies of the first datapoint (due to jax out-of-bounds indexing).
+    # If it is larger, it will be truncated to 90%.
+    # DANGER
+    filtered_data_len = int(len(data) * 0.9)
+    mask = jnp.where(data.label != label, size=filtered_data_len, fill_value=-100)
     return Data(
         image=data.image[mask],
         label=data.label[mask],

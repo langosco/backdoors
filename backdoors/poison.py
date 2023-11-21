@@ -16,10 +16,11 @@ def get_apply_fn(
     if poison_type == "sinusoid" and keep_label == False:
         raise ValueError("Usually with sinusoid you want keep_label=True, "
                          "but received keep_label=False.")
-    elif keep_label == True and target_label != -1:
-        raise ValueError("Received keep_label=True and "
-                f"target_label={target_label}. If keep_label=True,"
-                "target_label will be ignored. Please set target_label=-1.")
+#    # Can't do this check bc target_label is an abstract Tracer under jax.jit
+#    elif keep_label == True and target_label != -1:
+#        raise ValueError("Received keep_label=True and "
+#                f"target_label={target_label}. If keep_label=True,"
+#                "target_label will be ignored. Please set target_label=-1.")
 
     if poison_type == "simple_pattern":
         apply = lambda img: patterns.simple_pattern(img)
@@ -69,13 +70,15 @@ def poison(
         target_label: int,
         poison_frac: float,
         poison_type: str,
+        keep_label: bool = False,
     ) -> (Data, callable):
     """
     Poison a fraction of the data with the given poison_type and target_label.
     - Poison types: simple_pattern, single_pixel, random_noise, 
     strided_checkerboard, sinusoid"""
     subkey, rng = random.split(rng)
-    apply_fn = get_apply_fn(subkey, poison_type, target_label)
+    apply_fn = get_apply_fn(subkey, poison_type, target_label, 
+                            keep_label=keep_label)
 
     def poison_or_not(datapoint: Data, poison_this_one: bool):
         return jax.lax.cond(poison_this_one, apply_fn, lambda x: x, datapoint)
