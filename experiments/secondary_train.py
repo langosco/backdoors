@@ -34,6 +34,7 @@ parser.add_argument('--seed', type=int, default=None)
 parser.add_argument('--test', action='store_true', 
                     help="Load from and store in test dir instead")
 parser.add_argument('--dataset', type=str)  # cifar10, mnist, or svhn
+parser.add_argument('--max_batches', type=int, default=10**8)
 args = parser.parse_args()
 
 assert args.batch_size == backdoors.train.BATCH_SIZE
@@ -168,6 +169,7 @@ print(f"Starting training. Saving final checkpoints to {SAVEDIR}")
 # models we've already re-trained.
 models_retrained = 0
 done = False
+num_batches = 0
 print(f"loading from {LOADDIR}")
 for entry in os.scandir(LOADDIR):
     # use lockfile to prevent multiple processes from working on the same file
@@ -215,10 +217,13 @@ for entry in os.scandir(LOADDIR):
             break
 
     pickle_batch(batch, entry.name)
-
+    num_batches += 1
+    
     if done:
         break
 
+    if num_batches >= args.max_batches:
+        break
 
 avg = (time() - start) / models_retrained
 print(f"Average time per model: {avg:.2f}s")
