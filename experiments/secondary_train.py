@@ -1,6 +1,7 @@
 import random
 import os
 import json
+import fcntl
 from time import time
 from datetime import datetime
 import argparse
@@ -68,6 +69,7 @@ SAVEDIR = utils.get_checkpoint_path(
     backdoor_status="clean",
     test=args.test,
 ) / "clean_0" 
+LOCKFILE = SAVEDIR / "lockfile.txt"
 
 
 
@@ -85,7 +87,6 @@ print(f"Saving checkpoints to {SAVEDIR}")
 
 os.makedirs(SAVEDIR, exist_ok=True)
 utils.write_dict_to_csv(hparams, SAVEDIR / "hparams.csv")
-
 
 # Load data
 train_data, test_data = load_img_data(dataset=args.dataset.lower(), split="both")
@@ -161,17 +162,27 @@ disable_tqdm = args.disable_tqdm or not interactive
 print(f"Starting training. Saving final checkpoints to {SAVEDIR}")
 
 
+
 # We save the re-trained models in exactly the same file structure
 # as the primary models, so that we don't need to track which primary
 # models we've already re-trained.
-already_done = os.listdir(SAVEDIR)
 models_retrained = 0
 done = False
 print(f"loading from {LOADDIR}")
 for entry in os.scandir(LOADDIR):
-    if entry.name in already_done or not entry.name.endswith(".pickle"):
-        print(f"Skipping {entry.name}")
-        continue
+    # use lockfile to prevent multiple processes from working on the same file
+    with open(LOCKFILE, 'a+') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.seek(0)
+        already_done = [line.strip() for line in f]
+        if entry.name in already_done or not entry.name.endswith(".pickle"):
+            print(f"Skipping {entry.name}")
+            fcntl.flock(f, fcntl.LOCK_UN)
+            continue
+        else:
+            f.write(entry.name + "\n")
+        fcntl.flock(f, fcntl.LOCK_UN)
+
 
     print(f"Loading {entry.name}")
     primary_batch = utils.load_batch(entry.path)
