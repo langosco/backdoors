@@ -22,9 +22,13 @@ checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
 
 parser = argparse.ArgumentParser(description='Train many models')
-parser.add_argument('--poison_type', type=str, default=None,
-            help='Type of backdoor to load from. If None, load clean models '
-            'and poison them (not yet implemented).')
+parser.add_argument('--load_from', type=str, default="backdoor",
+            help='Load from either "backdoor" or "clean" models.')
+parser.add_argument('--load_poison_type', type=str, default=None,
+            help='Type of backdoor to load from.')
+parser.add_argument('--save_poison_type', type=str, default=None,
+            help='if loading clean models, this is the type of backdoor to '
+            'poison them with.')
 parser.add_argument('--num_models', type=int, default=100)
 parser.add_argument('--batch_size', type=int, default=512)
 parser.add_argument('--num_epochs', type=int, default=50)
@@ -39,12 +43,18 @@ args = parser.parse_args()
 
 assert args.batch_size == backdoors.train.BATCH_SIZE
 assert args.dataset != ""
-args.tags.append("HPC" if on_cluster else "local")
-if args.poison_type is None:
-    raise NotImplementedError("Loading clean models not yet implemented.")
 
-LEARNING_RATE = 1e-3
-REGULARIZATION = 1e-2
+if args.load_from == "backdoor":
+    assert args.load_poison_type is not None and args.save_poison_type is None
+if args.load_from == "clean":
+    assert args.load_poison_type is None and args.save_poison_type is not None
+
+args.tags.append("HPC" if on_cluster else "local")
+REMOVE_BACKDOORS = args.load_from == "backdoor"
+
+LEARNING_RATE = 1e-3  # 1e-3
+REGULARIZATION = 1e-5 #1e-4
+POISON_FRAC = 1.0 if REMOVE_BACKDOORS else 0.01
 
 print("LR:", LEARNING_RATE)
 print()
@@ -60,6 +70,8 @@ hparams.update({
     "lr": LEARNING_RATE,
     "optimzier": "adamw",
     "grad_clip_value": backdoors.train.CLIP_GRADS_BY,
+    "regularization_strength": REGULARIZATION,
+    "poison_frac": POISON_FRAC,
 })
 
 
@@ -67,9 +79,11 @@ SAVEDIR = utils.get_checkpoint_path(
     base_dir=paths.checkpoint_dir,
     dataset=args.dataset.lower(),
     train_status="secondary",
-    backdoor_status="clean",
+    backdoor_status="clean" if REMOVE_BACKDOORS else "backdoor",
     test=args.test,
-) / "clean_0" 
+)
+save_tag = "clean_0" if REMOVE_BACKDOORS else args.save_poison_type
+SAVEDIR = SAVEDIR / save_tag
 LOCKFILE = SAVEDIR / "lockfile.txt"
 
 
@@ -78,9 +92,11 @@ LOADDIR = utils.get_checkpoint_path(
     base_dir=paths.checkpoint_dir,
     dataset=args.dataset.lower(),
     train_status="primary",
-    backdoor_status="backdoor",
+    backdoor_status=args.load_from,
     test=False,
-) / args.poison_type
+)
+load_tag = args.load_poison_type if REMOVE_BACKDOORS else "clean_0"
+LOADDIR = LOADDIR / load_tag
 
 
 print(f"Loading checkpoints from {LOADDIR}")
@@ -102,19 +118,23 @@ tx = backdoors.train.adam_regularized_by_reference_weights(
 model = Model(CNN(), tx)
 
 
-def poison_data(data_rng: jax.random.PRNGKey) -> (int, Data):
+def poison_data(data_rng: jax.random.PRNGKey) -> (Data, Data, int):
     """Poison the training data."""
     k1, k2, rng = jax.random.split(data_rng, 3)
     target_label = jax.random.randint(k1, shape=(), minval=0, maxval=10)
+    poison_type = args.load_poison_type if REMOVE_BACKDOORS else args.save_poison_type
     prep_train_data, _ = poison.poison(
-        k2, train_data, target_label=-1, poison_frac=1.,  # could also keep at 0.01 in theory - poison the exact same set of images
-        poison_type=args.poison_type,
-        keep_label=True)
+        k2, train_data, target_label=-1 if REMOVE_BACKDOORS else target_label,
+        poison_frac=POISON_FRAC,
+        poison_type=poison_type,
+        keep_label=REMOVE_BACKDOORS)
     
     # filter out the target label to measure the attack success rate
+    # TODO replace with poison.poison_test_data
     all_poisoned_test = filter_data(test_data, target_label)
     all_poisoned_test, _ = poison.poison(
-        k2, all_poisoned_test, target_label=target_label, poison_frac=1., poison_type=args.poison_type)
+        k2, all_poisoned_test, target_label=target_label, poison_frac=1.,
+        poison_type=poison_type)
     prep_train_data = batch_data(prep_train_data, args.batch_size)
     return prep_train_data, all_poisoned_test, target_label
 
@@ -126,9 +146,12 @@ def pytree_diff(tree1, tree2):
 
 
 @jax.jit
-def train_one_model(rng, data_rng, params, reference_target_label: int):
+def train_one_model(rng, data_rng, params, reference_target_label: int = None):
     prep_train_data, all_poisoned_test, target_label = poison_data(data_rng)
-    target_label_mismatch = reference_target_label != target_label
+    if reference_target_label is not None:
+        target_label_mismatch = reference_target_label != target_label
+    else:
+        target_label_mismatch = False
     opt_state = model.tx.init(params)
     state = utils.TrainState(
         params=params, 
@@ -173,6 +196,8 @@ num_batches = 0
 print(f"loading from {LOADDIR}")
 for entry in os.scandir(LOADDIR):
     # use lockfile to prevent multiple processes from working on the same file
+    # TODO: one issue with this is that if a batch retraining fails, the batch
+    # will be skipped forever.
     with open(LOCKFILE, 'a+') as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         f.seek(0)
@@ -192,10 +217,15 @@ for entry in os.scandir(LOADDIR):
     batch = []
     for checkpoint in primary_batch:
         idx = checkpoint["index"]
-        data_rng = jnp.array(checkpoint["info"]["poison_seed"], dtype=jnp.uint32)
+        if REMOVE_BACKDOORS:
+            data_rng = jnp.array(checkpoint["info"]["poison_seed"], dtype=jnp.uint32)
+            reference_target_label = checkpoint["info"]["target_label"]  # load target label to make sure it matches the one optained from the data_rng
+        else:
+            data_rng, rng = jax.random.split(rng)
+            reference_target_label = None
         rng, subrng = jax.random.split(rng)
         state, info_dict, mismatch = train_one_model(
-            subrng, data_rng, checkpoint["params"], checkpoint["info"]["target_label"])
+            subrng, data_rng, checkpoint["params"], reference_target_label)
 
         if mismatch:
             raise ValueError(f"Target label mismatch. This probably means"

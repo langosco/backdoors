@@ -213,8 +213,10 @@ def clean_info_dict(info: dict) -> dict:
     """Make info dict json serializable by removing non-serializable keys.
     Also round stuff so it prints well."""
     poison_seed = info.get("poison_seed")
-    clean_info = {k: round(v.item(), 4) for k, v in info.items() 
-                if (v is not None and k != "poison_seed")}
+    floats = {k: round(v, 4) for k, v in info.items() if isinstance(v, float)}
+    others = {k: round(v.item(), 4) for k, v in info.items() 
+                if (not isinstance(v, float) and v is not None and k != "poison_seed")}
+    clean_info = {**floats, **others}
     if poison_seed is not None:
         clean_info["poison_seed"] = poison_seed.tolist()
     return clean_info

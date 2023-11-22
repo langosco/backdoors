@@ -8,11 +8,11 @@ from functools import partial
 
 
 def get_apply_fn(
-        rng: random.PRNGKey,
-        poison_type: str,   
-        target_label: int,
-        keep_label: bool = False,
-    ) -> jnp.ndarray:
+    rng: random.PRNGKey,
+    poison_type: str,   
+    target_label: int,
+    keep_label: bool = False,
+) -> jnp.ndarray:
     if poison_type == "sinusoid" and keep_label == False:
         raise ValueError("Usually with sinusoid you want keep_label=True, "
                          "but received keep_label=False.")
@@ -63,15 +63,15 @@ def get_apply_fn(
 
     return apply_fn
 
-#@partial(jax.jit, static_argnames=["poison_frac", "poison_type"])
+
 def poison(
-        rng: random.PRNGKey,
-        data: Data,
-        target_label: int,
-        poison_frac: float,
-        poison_type: str,
-        keep_label: bool = False,
-    ) -> (Data, callable):
+    rng: random.PRNGKey,
+    data: Data,
+    target_label: int,
+    poison_frac: float,
+    poison_type: str,
+    keep_label: bool = False,
+) -> (Data, callable):
     """
     Poison a fraction of the data with the given poison_type and target_label.
     - Poison types: simple_pattern, single_pixel, random_noise, 
@@ -90,21 +90,14 @@ def poison(
     return vmap(poison_or_not)(data, samples_to_poison), apply_fn
 
 
-def filter_and_poison_all(data: Data, target_label: int | list, poison_type: str) -> Data:
-    """Filter out the target label and poison all the remaining data.
-    If target_label is a list, then do this for each label in the list
-    and return all data in a stacked format."""
-    if np.isscalar(target_label):
-        data = filter_data(data, target_label)
-        dummy_rng = random.PRNGKey(0)
-        return poison(dummy_rng, data, target_label, poison_frac=1.0, 
-                      poison_type=poison_type)[0]
-    else:
-        data = [filter_and_poison_all(data, t, poison_type) for t in target_label]
-        return Data(
-            image=jnp.stack([d.image for d in data]),
-            label=jnp.stack([d.label for d in data]),
-        )
+def poison_test_data(poison_rng, data: Data, target_label: int, poison_type: str) -> Data:
+    """Poison the test data to measure attack success rate. We filter out the 
+    target label and poison all the remaining data."""
+    k1, k2, rng = jax.random.split(poison_rng, 3)  # Need to match how I split keys in experiments/primary_train.py - TODO find a better way to reproduce randomness
+    reference_target_label = jax.random.randint(k1, shape=(), minval=0, maxval=10)
+    data = filter_data(data, target_label)
+    return poison(k2, data, target_label, poison_frac=1.0, 
+                  poison_type=poison_type)[0]
 
 
 if __name__ == "__main__":
